@@ -1,4 +1,4 @@
-const API_URL = "http://127.0.0.1:5055";
+const API_URL = "https://clinic-pro-whatsapp.onrender.com";
 
 async function loadDoctors() {
   const response = await fetch(`${API_URL}/doctors`);
