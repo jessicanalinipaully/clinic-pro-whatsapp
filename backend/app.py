@@ -206,37 +206,26 @@ def process_chat_message(phone, message):
             "2. View Doctors\n"
             "3. Clinic Timings"
         )
-
     if step == "ask_name":
-        otp = str(random.randint(1000, 9999))
-
         conversations.loc[index, "patient_name"] = message
-        conversations.loc[index, "otp"] = otp
-        conversations.loc[index, "verified"] = "False"
-        conversations.loc[index, "step"] = "ask_otp"
-
-        write_all_sheets(patients, doctors, appointments, conversations)
-
-        return f"Your OTP is {otp}.\nPlease enter this OTP to verify your number."
-
-    if step == "ask_otp":
-        correct_otp = str(conversations.loc[index, "otp"])
-
-        if message != correct_otp:
-            return "Invalid OTP. Please try again."
-
         conversations.loc[index, "verified"] = "True"
         conversations.loc[index, "step"] = "ask_doctor"
 
         doctor_lines = []
+
         for _, doctor in doctors.iterrows():
             doctor_lines.append(
                 f"{doctor['doctor_id']}. {doctor['name']} - {doctor['specialization']}"
             )
 
-        write_all_sheets(patients, doctors, appointments, conversations)
+        write_all_sheets(
+            patients,
+            doctors,
+            appointments,
+            conversations
+        )
 
-        return "Number verified ✅\n\nChoose doctor:\n" + "\n".join(doctor_lines)
+        return "Choose doctor:\n\n" + "\n".join(doctor_lines)
 
     if step == "ask_doctor":
         valid_doctor_ids = doctors["doctor_id"].astype(str).tolist()
