@@ -97,6 +97,30 @@ def is_valid_time(time_text):
     return re.match(pattern, time_text) is not None
 
 
+def get_available_slots(doctor_id, date, appointments):
+    all_slots = [
+        "09:00", "09:30",
+        "10:00", "10:30",
+        "11:00", "11:30",
+        "12:00", "12:30",
+        "14:00", "14:30",
+        "15:00", "15:30",
+        "16:00", "16:30",
+        "17:00", "17:30"
+    ]
+
+    if appointments.empty:
+        return all_slots
+
+    booked_slots = appointments[
+        (appointments["doctor_id"].astype(str) == str(doctor_id)) &
+        (appointments["date"].astype(str) == str(date)) &
+        (appointments["status"].astype(str).isin(["booked", "confirmed"]))
+    ]["time"].astype(str).tolist()
+
+    return [slot for slot in all_slots if slot not in booked_slots]
+
+
 def send_whatsapp_message(to, message):
     url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
 
@@ -141,7 +165,7 @@ def process_chat_message(phone, message):
             "patient_name": "",
             "step": "menu",
             "otp": "",
-            "verified": "False",
+            "verified": "True",
             "doctor_id": "",
             "date": "",
             "time": ""
@@ -206,24 +230,19 @@ def process_chat_message(phone, message):
             "2. View Doctors\n"
             "3. Clinic Timings"
         )
+
     if step == "ask_name":
         conversations.loc[index, "patient_name"] = message
         conversations.loc[index, "verified"] = "True"
         conversations.loc[index, "step"] = "ask_doctor"
 
         doctor_lines = []
-
         for _, doctor in doctors.iterrows():
             doctor_lines.append(
                 f"{doctor['doctor_id']}. {doctor['name']} - {doctor['specialization']}"
             )
 
-        write_all_sheets(
-            patients,
-            doctors,
-            appointments,
-            conversations
-        )
+        write_all_sheets(patients, doctors, appointments, conversations)
 
         return "Choose doctor:\n\n" + "\n".join(doctor_lines)
 
@@ -244,21 +263,45 @@ def process_chat_message(phone, message):
         if not is_valid_date(message):
             return "Invalid date format.\nPlease enter like this:\nYYYY-MM-DD\nExample: 2026-06-10"
 
+        doctor_id = str(conversations.loc[index, "doctor_id"])
+
+        available_slots = get_available_slots(doctor_id, message, appointments)
+
+        if len(available_slots) == 0:
+            return "No slots are available on this date. Please enter another date."
+
         conversations.loc[index, "date"] = message
-        conversations.loc[index, "step"] = "ask_time"
+        conversations.loc[index, "step"] = "choose_slot"
 
         write_all_sheets(patients, doctors, appointments, conversations)
 
-        return "Enter appointment time in this format:\nHH:MM\nExample: 10:30"
+        slot_lines = []
+        for i, slot in enumerate(available_slots, start=1):
+            slot_lines.append(f"{i}. {slot}")
 
-    if step == "ask_time":
-        if not is_valid_time(message):
-            return "Invalid time format.\nPlease enter like this:\nHH:MM\nExample: 10:30"
+        return (
+            "Available slots:\n\n"
+            + "\n".join(slot_lines)
+            + "\n\nPlease reply with the slot number."
+        )
 
-        patient_name = str(conversations.loc[index, "patient_name"])
+    if step == "choose_slot":
         doctor_id = str(conversations.loc[index, "doctor_id"])
         date = str(conversations.loc[index, "date"])
-        time = message
+
+        available_slots = get_available_slots(doctor_id, date, appointments)
+
+        try:
+            choice = int(message)
+        except ValueError:
+            return "Please enter a valid slot number."
+
+        if choice < 1 or choice > len(available_slots):
+            return "Please choose a valid slot number from the list."
+
+        selected_time = available_slots[choice - 1]
+
+        patient_name = str(conversations.loc[index, "patient_name"])
 
         doctor_row = doctors[doctors["doctor_id"].astype(str) == doctor_id]
 
@@ -269,16 +312,6 @@ def process_chat_message(phone, message):
 
         doctor_name = doctor_row.iloc[0]["name"]
 
-        clash = appointments[
-            (appointments["doctor_id"].astype(str) == doctor_id) &
-            (appointments["date"].astype(str) == date) &
-            (appointments["time"].astype(str) == time) &
-            (appointments["status"].astype(str).isin(["booked", "confirmed"]))
-        ]
-
-        if not clash.empty:
-            return "Doctor is not free at this time.\nPlease enter another time in HH:MM format."
-
         new_appointment = {
             "appointment_id": str(len(appointments) + 1),
             "patient_name": patient_name,
@@ -286,7 +319,7 @@ def process_chat_message(phone, message):
             "doctor_id": doctor_id,
             "doctor_name": doctor_name,
             "date": date,
-            "time": time,
+            "time": selected_time,
             "status": "booked",
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
@@ -309,7 +342,7 @@ def process_chat_message(phone, message):
             )
 
         conversations.loc[index, "step"] = "completed"
-        conversations.loc[index, "time"] = time
+        conversations.loc[index, "time"] = selected_time
 
         write_all_sheets(patients, doctors, appointments, conversations)
 
@@ -318,7 +351,7 @@ def process_chat_message(phone, message):
             f"Patient: {patient_name}\n"
             f"Doctor: {doctor_name}\n"
             f"Date: {date}\n"
-            f"Time: {time}\n\n"
+            f"Time: {selected_time}\n\n"
             "ABC Clinic will confirm your appointment soon."
         )
 
@@ -326,8 +359,6 @@ def process_chat_message(phone, message):
         if message == "1":
             conversations.loc[index, "step"] = "ask_name"
             conversations.loc[index, "patient_name"] = ""
-            conversations.loc[index, "otp"] = ""
-            conversations.loc[index, "verified"] = "False"
             conversations.loc[index, "doctor_id"] = ""
             conversations.loc[index, "date"] = ""
             conversations.loc[index, "time"] = ""
@@ -560,10 +591,7 @@ def confirm_appointment(appointment_id):
     ]
 
     if selected.empty:
-        return jsonify({
-            "success": False,
-            "message": "Appointment not found"
-        }), 404
+        return jsonify({"success": False, "message": "Appointment not found"}), 404
 
     patient_phone = str(selected.iloc[0]["phone"])
     patient_name = str(selected.iloc[0]["patient_name"])
@@ -605,10 +633,7 @@ def complete_appointment(appointment_id):
     ]
 
     if selected.empty:
-        return jsonify({
-            "success": False,
-            "message": "Appointment not found"
-        }), 404
+        return jsonify({"success": False, "message": "Appointment not found"}), 404
 
     patient_phone = str(selected.iloc[0]["phone"])
     patient_name = str(selected.iloc[0]["patient_name"])
@@ -644,10 +669,7 @@ def cancel_appointment(appointment_id):
     ]
 
     if selected.empty:
-        return jsonify({
-            "success": False,
-            "message": "Appointment not found"
-        }), 404
+        return jsonify({"success": False, "message": "Appointment not found"}), 404
 
     patient_phone = str(selected.iloc[0]["phone"])
     patient_name = str(selected.iloc[0]["patient_name"])
@@ -676,6 +698,39 @@ def cancel_appointment(appointment_id):
     return jsonify({
         "success": True,
         "message": "Appointment cancelled successfully",
+        "whatsapp_message": whatsapp_message
+    })
+
+
+@app.route("/reminder/<int:appointment_id>", methods=["POST"])
+def send_reminder(appointment_id):
+    patients, doctors, appointments, conversations = load_all()
+
+    selected = appointments[
+        appointments["appointment_id"].astype(str) == str(appointment_id)
+    ]
+
+    if selected.empty:
+        return jsonify({"success": False, "message": "Appointment not found"}), 404
+
+    patient_phone = str(selected.iloc[0]["phone"])
+    patient_name = str(selected.iloc[0]["patient_name"])
+    doctor_name = str(selected.iloc[0]["doctor_name"])
+    date = str(selected.iloc[0]["date"])
+    time = str(selected.iloc[0]["time"])
+
+    whatsapp_message = (
+        "Reminder from ABC Clinic ⏰\n\n"
+        f"Hi {patient_name},\n"
+        f"Your appointment with {doctor_name} is on {date} at {time}.\n\n"
+        "Please be on time."
+    )
+
+    send_whatsapp_message(patient_phone, whatsapp_message)
+
+    return jsonify({
+        "success": True,
+        "message": "Reminder sent successfully",
         "whatsapp_message": whatsapp_message
     })
 
