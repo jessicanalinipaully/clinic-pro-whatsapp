@@ -393,8 +393,10 @@ def process_chat_message(phone, message):
         }], dtype=object)], ignore_index=True)
 
         write_all_sheets(patients, doctors, appointments, conversations)
-        return show_menu()
 
+        patients, doctors, appointments, conversations = load_all()
+        existing = conversations[conversations["phone"].astype(str) == str(phone)]
+    
     index = existing.index[0]
     step = str(conversations.loc[index, "step"])
 
