@@ -1,3 +1,4 @@
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import pandas as pd
@@ -11,6 +12,8 @@ CORS(app)
 
 EXCEL_FILE = "database.xlsx"
 VERIFY_TOKEN = "clinic_verify_123"
+WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
+PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 
 
 def create_excel_if_missing():
@@ -93,6 +96,33 @@ def is_valid_time(time_text):
     return re.match(pattern, time_text) is not None
 
 
+def send_whatsapp_message(to, message):
+    url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "text",
+        "text": {
+            "body": message
+        }
+    }
+
+    response = requests.post(
+        url,
+        headers=headers,
+        json=payload
+    )
+
+    print("SEND RESPONSE:", response.status_code)
+    print(response.text)
+
+
 @app.route("/")
 def home():
     return jsonify({"message": "Clinic Pro WhatsApp Backend is running"})
@@ -113,7 +143,34 @@ def verify_webhook():
 @app.route("/webhook", methods=["POST"])
 def receive_webhook():
     data = request.get_json()
+
     print("WHATSAPP WEBHOOK DATA:", data)
+
+    try:
+        entry = data["entry"][0]
+        changes = entry["changes"][0]
+        value = changes["value"]
+
+        messages = value.get("messages", [])
+
+        if messages:
+            phone = messages[0]["from"]
+            text = messages[0]["text"]["body"]
+
+            print("MESSAGE:", text)
+
+            reply = (
+                "Welcome to ABC Clinic 👋\n\n"
+                "1. Book Appointment\n"
+                "2. View Doctors\n"
+                "3. Clinic Timings"
+            )
+
+            send_whatsapp_message(phone, reply)
+
+    except Exception as e:
+        print("WEBHOOK ERROR:", e)
+
     return "EVENT_RECEIVED", 200
 
 
