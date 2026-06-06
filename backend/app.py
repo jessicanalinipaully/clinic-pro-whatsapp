@@ -5,6 +5,7 @@ import os
 from datetime import datetime, date, timedelta
 import re
 import requests
+import json
 
 app = Flask(__name__)
 CORS(app)
@@ -16,12 +17,7 @@ WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-DEFAULT_SLOTS = [
-    "09:00", "09:30", "10:00", "10:30",
-    "11:00", "11:30", "12:00", "12:30",
-    "14:00", "14:30", "15:00", "15:30",
-    "16:00", "16:30", "17:00", "17:30"
-]
+GEMINI_MODEL = "gemini-2.0-flash"
 
 
 def to_am_pm(time_text):
@@ -30,15 +26,10 @@ def to_am_pm(time_text):
 
 def is_valid_date(date_text):
     try:
-        selected = datetime.strptime(date_text, "%Y-%m-%d").date()
+        selected = datetime.strptime(str(date_text), "%Y-%m-%d").date()
         return selected >= date.today()
     except ValueError:
         return False
-
-
-def is_valid_time(time_text):
-    pattern = r"^([01]\d|2[0-3]):[0-5]\d$"
-    return re.match(pattern, str(time_text)) is not None
 
 
 def create_excel_if_missing():
@@ -176,11 +167,8 @@ def get_doctor_slots(doctor_id, selected_date, doctors):
         return []
 
     doctor = doctor.iloc[0]
-
     selected_day = datetime.strptime(selected_date, "%Y-%m-%d").strftime("%A")
-    working_days = str(doctor["working_days"]).split(",")
-
-    working_days = [d.strip() for d in working_days]
+    working_days = [d.strip() for d in str(doctor["working_days"]).split(",")]
 
     if selected_day not in working_days:
         return []
@@ -190,14 +178,13 @@ def get_doctor_slots(doctor_id, selected_date, doctors):
     slot_minutes = int(str(doctor["slot_minutes"] or "30"))
 
     slots = []
-
     current = datetime.strptime(start_time, "%H:%M")
     end = datetime.strptime(end_time, "%H:%M")
 
     while current < end:
         time_value = current.strftime("%H:%M")
 
-        if "13:00" > time_value or time_value >= "14:00":
+        if time_value < "13:00" or time_value >= "14:00":
             slots.append(time_value)
 
         current += timedelta(minutes=slot_minutes)
@@ -240,6 +227,29 @@ def send_whatsapp_message(to, message):
     print(response.text)
 
 
+def show_menu():
+    return (
+        "Welcome to ABC Clinic 👋\n\n"
+        "You can type naturally, for example:\n"
+        "• I need a skin specialist\n"
+        "• I have tooth pain\n"
+        "• Book appointment tomorrow\n"
+        "• Cancel my appointment\n"
+        "• Reschedule my appointment\n\n"
+        "Or choose:\n"
+        "1. Book Appointment\n"
+        "2. View Doctors\n"
+        "3. Clinic Timings"
+    )
+
+
+def doctor_list_text(doctors):
+    lines = []
+    for _, doctor in doctors.iterrows():
+        lines.append(f"{doctor['doctor_id']}. {doctor['name']} - {doctor['specialization']}")
+    return "\n".join(lines)
+
+
 def active_appointments_for_phone(phone, appointments):
     return appointments[
         (appointments["phone"].astype(str) == str(phone)) &
@@ -247,48 +257,54 @@ def active_appointments_for_phone(phone, appointments):
     ]
 
 
-def show_menu():
-    return (
-        "Welcome to ABC Clinic 👋\n\n"
-        "Please choose an option:\n"
-        "1. Book Appointment\n"
-        "2. View Doctors\n"
-        "3. Clinic Timings\n"
-        "4. Reschedule Appointment\n"
-        "5. Cancel Appointment"
-    )
-def ask_gemini(user_message, doctors):
-    doctor_list = doctors[["name", "specialization"]].to_dict(orient="records")
+def ask_gemini(user_message, doctors, step):
+    doctor_info = doctors[["doctor_id", "name", "specialization"]].to_dict(orient="records")
+    today = date.today().strftime("%Y-%m-%d")
 
     prompt = f"""
 You are an AI receptionist for ABC Clinic.
 
+Today is {today}.
+
 Available doctors:
-{doctor_list}
+{doctor_info}
+
+Current booking step:
+{step}
 
 User message:
 "{user_message}"
 
-Understand the user's intent.
+Understand the patient's intent and return ONLY valid JSON.
 
-Return ONLY JSON like this:
+JSON format:
 {{
   "intent": "book" | "cancel" | "reschedule" | "view_doctors" | "clinic_timings" | "doctor_query" | "small_talk" | "unknown",
+  "doctor_id": "",
   "doctor_specialization": "",
-  "date_text": "",
-  "reply": ""
+  "date_iso": "",
+  "patient_name": "",
+  "slot_number": "",
+  "answer": ""
 }}
 
 Rules:
-- If user wants appointment, intent is book.
-- If user asks for unavailable doctor like psychiatrist, intent is doctor_query.
-- If user says cancel appointment, intent is cancel.
-- If user says reschedule/change/postpone, intent is reschedule.
-- If normal greeting or thanks, intent is small_talk.
+- If user says skin specialist, skin rash, acne, allergy, pigmentation, dermatologist → doctor_id should be "1".
+- If user says tooth pain, dental, teeth, dentist, cavity → doctor_id should be "2".
+- If user says fever, cough, cold, headache, body pain, general sickness → doctor_id should be "3".
+- If user asks for psychiatrist, cardiologist, orthopedist, gynecologist, etc. and it is not in the available doctors, intent should be "doctor_query" and doctor_id should be "".
+- If user wants to book, schedule, see doctor, consult, get appointment → intent "book".
+- If user wants cancel/remove booking → intent "cancel".
+- If user wants reschedule/change/postpone appointment → intent "reschedule".
+- Convert dates like tomorrow, next Monday, next week Tuesday, 3rd of next month into YYYY-MM-DD in date_iso.
+- If user gives a name during ask_name step, put it in patient_name.
+- If user chooses slot number like 1, 2, 3, put it in slot_number.
+- Do not invent doctors.
+- Keep answer short and clinic-friendly.
 """
 
     try:
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
         headers = {
             "Content-Type": "application/json",
@@ -296,32 +312,65 @@ Rules:
         }
 
         payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt}
-                    ]
-                }
-            ]
+            "contents": [{"parts": [{"text": prompt}]}]
         }
 
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
         data = response.json()
 
         text = data["candidates"][0]["content"]["parts"][0]["text"]
         text = text.replace("```json", "").replace("```", "").strip()
 
-        import json
-        return json.loads(text)
+        ai = json.loads(text)
+        print("AI RESPONSE:", ai)
+        return ai
 
     except Exception as e:
         print("GEMINI ERROR:", e)
         return {
             "intent": "unknown",
+            "doctor_id": "",
             "doctor_specialization": "",
-            "date_text": "",
-            "reply": ""
+            "date_iso": "",
+            "patient_name": "",
+            "slot_number": "",
+            "answer": ""
         }
+
+
+def choose_doctor_response(doctor_id, doctors):
+    doctor_row = doctors[doctors["doctor_id"].astype(str) == str(doctor_id)]
+
+    if doctor_row.empty:
+        return None
+
+    doctor = doctor_row.iloc[0]
+
+    return (
+        f"Perfect. Based on your message, {doctor['name']} "
+        f"({doctor['specialization']}) is the right doctor.\n\n"
+        "Please enter appointment date in YYYY-MM-DD format.\n"
+        "Example: 2026-06-10"
+    )
+
+
+def send_available_slots_response(doctor_id, selected_date, doctors, appointments):
+    available_slots = get_available_slots(doctor_id, selected_date, doctors, appointments)
+
+    if not available_slots:
+        return "No slots available on this date. Please enter another date."
+
+    slot_lines = [
+        f"{i}. {to_am_pm(slot)}"
+        for i, slot in enumerate(available_slots, start=1)
+    ]
+
+    return (
+        "Available slots:\n\n"
+        + "\n".join(slot_lines)
+        + "\n\nPlease reply with the slot number."
+    )
+
 
 def process_chat_message(phone, message):
     message = str(message).strip()
@@ -348,67 +397,36 @@ def process_chat_message(phone, message):
 
     index = existing.index[0]
     step = str(conversations.loc[index, "step"])
-    ai = ask_gemini(message, doctors)
+
+    ai = ask_gemini(message, doctors, step)
     intent = ai.get("intent", "unknown")
-    doctor_specialization = ai.get("doctor_specialization", "").lower()
-
-    if intent == "book" and step == "menu":
-        conversations.loc[index, "step"] = "ask_name"
-        write_all_sheets(patients, doctors, appointments, conversations)
-        return "Sure, I can help you book an appointment. Please enter your full name."
-
-    if intent == "view_doctors" and step == "menu":
-        lines = []
-        for _, doctor in doctors.iterrows():
-            lines.append(f"{doctor['doctor_id']}. {doctor['name']} - {doctor['specialization']}")
-        return "Our doctors are:\n\n" + "\n".join(lines)
-
-    if intent == "clinic_timings" and step == "menu":
-        return (
-            "ABC Clinic Timings:\n\n"
-            "Monday to Saturday\n"
-            "9:00 AM to 6:00 PM\n\n"
-            "Lunch Break: 1:00 PM to 2:00 PM\n"
-            "Sunday closed."
-        )
-
-    if intent == "cancel":
-        return process_chat_message(phone, "cancel")
-
-    if intent == "reschedule":
-        return process_chat_message(phone, "reschedule")
-
-    if intent == "doctor_query":
-        available_specs = doctors["specialization"].astype(str).str.lower().tolist()
-
-        if doctor_specialization and doctor_specialization not in " ".join(available_specs):
-            lines = []
-            for _, doctor in doctors.iterrows():
-                lines.append(f"{doctor['doctor_id']}. {doctor['name']} - {doctor['specialization']}")
-
-            return (
-                f"I'm sorry, we do not have a {doctor_specialization} available right now.\n\n"
-                "Available doctors are:\n\n"
-                + "\n".join(lines)
-                + "\n\nWould you like to continue with one of these doctors?\nReply with the doctor number or type cancel."
-            )
+    ai_doctor_id = str(ai.get("doctor_id", "")).strip()
+    ai_date = str(ai.get("date_iso", "")).strip()
+    ai_slot_number = str(ai.get("slot_number", "")).strip()
+    ai_patient_name = str(ai.get("patient_name", "")).strip()
+    ai_specialization = str(ai.get("doctor_specialization", "")).strip()
 
     if lower_msg in ["hi", "hello", "menu", "start"]:
         conversations.loc[index, "step"] = "menu"
         write_all_sheets(patients, doctors, appointments, conversations)
         return show_menu()
 
-    if lower_msg == "cancel":
+    if intent == "cancel" or "cancel" in lower_msg:
         active = active_appointments_for_phone(phone, appointments)
 
         if active.empty:
+            conversations.loc[index, "step"] = "menu"
+            write_all_sheets(patients, doctors, appointments, conversations)
             return "You do not have any active appointment to cancel."
 
         appt = active.iloc[-1]
+
         appointments.loc[
             appointments["appointment_id"].astype(str) == str(appt["appointment_id"]),
             "status"
         ] = "cancelled"
+
+        conversations.loc[index, "step"] = "menu"
 
         write_all_sheets(patients, doctors, appointments, conversations)
 
@@ -416,10 +434,11 @@ def process_chat_message(phone, message):
             "Your appointment has been cancelled ❌\n\n"
             f"Doctor: {appt['doctor_name']}\n"
             f"Date: {appt['date']}\n"
-            f"Time: {to_am_pm(appt['time'])}"
+            f"Time: {to_am_pm(appt['time'])}\n\n"
+            "Type 'book appointment' if you want a new appointment."
         )
 
-    if lower_msg == "reschedule":
+    if intent == "reschedule" or "reschedule" in lower_msg or "change" in lower_msg or "postpone" in lower_msg:
         active = active_appointments_for_phone(phone, appointments)
 
         if active.empty:
@@ -439,93 +458,133 @@ def process_chat_message(phone, message):
             f"Doctor: {appt['doctor_name']}\n"
             f"Date: {appt['date']}\n"
             f"Time: {to_am_pm(appt['time'])}\n\n"
-            "Enter new date in this format:\n"
-            "YYYY-MM-DD"
+            "Please enter the new date."
+        )
+
+    if intent == "clinic_timings" or message == "3":
+        return (
+            "ABC Clinic Timings:\n\n"
+            "Monday to Saturday\n"
+            "9:00 AM to 6:00 PM\n\n"
+            "Lunch Break: 1:00 PM to 2:00 PM\n"
+            "Sunday closed."
+        )
+
+    if intent == "view_doctors" or message == "2":
+        return "Our doctors are:\n\n" + doctor_list_text(doctors)
+
+    if intent == "doctor_query" and not ai_doctor_id:
+        return (
+            f"I'm sorry, we do not currently have a {ai_specialization or 'doctor for that specialty'} available.\n\n"
+            "Available doctors are:\n\n"
+            + doctor_list_text(doctors)
+            + "\n\nWould you like to continue with one of these doctors?\nReply with the doctor number or type cancel."
         )
 
     if step == "menu":
-        if message == "1":
+        if message == "1" or intent == "book":
             conversations.loc[index, "step"] = "ask_name"
+
+            if ai_doctor_id:
+                conversations.loc[index, "doctor_id"] = ai_doctor_id
+
+            if ai_date and is_valid_date(ai_date):
+                conversations.loc[index, "date"] = ai_date
+
             write_all_sheets(patients, doctors, appointments, conversations)
-            return "Great. Please enter your full name."
 
-        if message == "2":
-            lines = []
-            for _, doctor in doctors.iterrows():
-                lines.append(
-                    f"{doctor['doctor_id']}. {doctor['name']} - {doctor['specialization']}"
+            if ai_doctor_id:
+                doctor_row = doctors[doctors["doctor_id"].astype(str) == ai_doctor_id].iloc[0]
+                return (
+                    f"Sure. I can help you book with {doctor_row['name']} "
+                    f"({doctor_row['specialization']}).\n\n"
+                    "Please enter your full name."
                 )
-            return "Our doctors are:\n\n" + "\n".join(lines)
 
-        if message == "3":
-            return (
-                "ABC Clinic Timings:\n\n"
-                "Monday to Saturday\n"
-                "9:00 AM to 6:00 PM\n\n"
-                "Lunch Break: 1:00 PM to 2:00 PM\n"
-                "Sunday closed."
-            )
-
-        if message == "4":
-            return process_chat_message(phone, "reschedule")
-
-        if message == "5":
-            return process_chat_message(phone, "cancel")
+            return "Sure, I can help you book an appointment. Please enter your full name."
 
         return show_menu()
 
     if step == "ask_name":
-        conversations.loc[index, "patient_name"] = message
+        patient_name = ai_patient_name if ai_patient_name else message
+
+        conversations.loc[index, "patient_name"] = patient_name
+
+        existing_doctor_id = str(conversations.loc[index, "doctor_id"]).strip()
+        existing_date = str(conversations.loc[index, "date"]).strip()
+
+        if ai_doctor_id:
+            conversations.loc[index, "doctor_id"] = ai_doctor_id
+            existing_doctor_id = ai_doctor_id
+
+        if ai_date and is_valid_date(ai_date):
+            conversations.loc[index, "date"] = ai_date
+            existing_date = ai_date
+
+        if existing_doctor_id:
+            conversations.loc[index, "step"] = "ask_date"
+            write_all_sheets(patients, doctors, appointments, conversations)
+
+            if existing_date and is_valid_date(existing_date):
+                conversations.loc[index, "step"] = "choose_slot"
+                write_all_sheets(patients, doctors, appointments, conversations)
+                return send_available_slots_response(existing_doctor_id, existing_date, doctors, appointments)
+
+            return choose_doctor_response(existing_doctor_id, doctors)
+
         conversations.loc[index, "step"] = "ask_doctor"
-
-        lines = []
-        for _, doctor in doctors.iterrows():
-            lines.append(
-                f"{doctor['doctor_id']}. {doctor['name']} - {doctor['specialization']}"
-            )
-
         write_all_sheets(patients, doctors, appointments, conversations)
 
-        return "Choose doctor:\n\n" + "\n".join(lines)
+        return "Choose doctor:\n\n" + doctor_list_text(doctors)
 
     if step == "ask_doctor":
-        valid_ids = doctors["doctor_id"].astype(str).tolist()
+        selected_doctor_id = ""
 
-        if message not in valid_ids:
-            return "Please choose a valid doctor number."
+        if message in doctors["doctor_id"].astype(str).tolist():
+            selected_doctor_id = message
+        elif ai_doctor_id:
+            selected_doctor_id = ai_doctor_id
 
-        conversations.loc[index, "doctor_id"] = message
+        if not selected_doctor_id:
+            return (
+                "I couldn't match that to an available doctor.\n\n"
+                "Available doctors are:\n\n"
+                + doctor_list_text(doctors)
+                + "\n\nPlease reply with the doctor number."
+            )
+
+        conversations.loc[index, "doctor_id"] = selected_doctor_id
         conversations.loc[index, "step"] = "ask_date"
 
         write_all_sheets(patients, doctors, appointments, conversations)
 
-        return "Enter appointment date:\nYYYY-MM-DD\nExample: 2026-06-10"
+        return choose_doctor_response(selected_doctor_id, doctors)
 
     if step == "ask_date":
-        if not is_valid_date(message):
-            return "Invalid date. Please enter today or a future date:\nYYYY-MM-DD"
+        selected_date = ""
+
+        if is_valid_date(message):
+            selected_date = message
+        elif ai_date and is_valid_date(ai_date):
+            selected_date = ai_date
+
+        if not selected_date:
+            return (
+                "Please enter a valid future date.\n\n"
+                "Examples:\n"
+                "2026-06-10\n"
+                "tomorrow\n"
+                "next Tuesday"
+            )
 
         doctor_id = str(conversations.loc[index, "doctor_id"])
-        available_slots = get_available_slots(doctor_id, message, doctors, appointments)
 
-        if not available_slots:
-            return "No slots available on this date. Please enter another date."
-
-        conversations.loc[index, "date"] = message
+        conversations.loc[index, "date"] = selected_date
         conversations.loc[index, "step"] = "choose_slot"
 
         write_all_sheets(patients, doctors, appointments, conversations)
 
-        slot_lines = [
-            f"{i}. {to_am_pm(slot)}"
-            for i, slot in enumerate(available_slots, start=1)
-        ]
-
-        return (
-            "Available slots:\n\n"
-            + "\n".join(slot_lines)
-            + "\n\nPlease reply with the slot number."
-        )
+        return send_available_slots_response(doctor_id, selected_date, doctors, appointments)
 
     if step == "choose_slot":
         doctor_id = str(conversations.loc[index, "doctor_id"])
@@ -533,10 +592,12 @@ def process_chat_message(phone, message):
 
         available_slots = get_available_slots(doctor_id, selected_date, doctors, appointments)
 
+        slot_text = ai_slot_number if ai_slot_number else message
+
         try:
-            choice = int(message)
+            choice = int(slot_text)
         except ValueError:
-            return "Please enter a valid slot number."
+            return "Please enter the slot number shown in the list."
 
         if choice < 1 or choice > len(available_slots):
             return "Please choose a valid slot number."
@@ -574,6 +635,7 @@ def process_chat_message(phone, message):
 
         conversations.loc[index, "step"] = "completed"
         conversations.loc[index, "time"] = selected_time
+        conversations.loc[index, "appointment_id"] = new_appointment["appointment_id"]
 
         write_all_sheets(patients, doctors, appointments, conversations)
 
@@ -584,37 +646,28 @@ def process_chat_message(phone, message):
             f"Date: {selected_date}\n"
             f"Time: {to_am_pm(selected_time)}\n\n"
             "ABC Clinic will confirm your appointment soon.\n\n"
-            "Type 'reschedule' to reschedule.\n"
-            "Type 'cancel' to cancel."
+            "You can type 'cancel appointment' or 'reschedule appointment' anytime."
         )
 
     if step == "reschedule_date":
-        if not is_valid_date(message):
-            return "Invalid date. Please enter today or a future date:\nYYYY-MM-DD"
+        selected_date = ""
+
+        if is_valid_date(message):
+            selected_date = message
+        elif ai_date and is_valid_date(ai_date):
+            selected_date = ai_date
+
+        if not selected_date:
+            return "Please enter a valid future date."
 
         doctor_id = str(conversations.loc[index, "doctor_id"])
-        appointment_id = str(conversations.loc[index, "appointment_id"])
 
-        available_slots = get_available_slots(doctor_id, message, doctors, appointments)
-
-        if not available_slots:
-            return "No slots available on this date. Please enter another date."
-
-        conversations.loc[index, "date"] = message
+        conversations.loc[index, "date"] = selected_date
         conversations.loc[index, "step"] = "reschedule_slot"
 
         write_all_sheets(patients, doctors, appointments, conversations)
 
-        slot_lines = [
-            f"{i}. {to_am_pm(slot)}"
-            for i, slot in enumerate(available_slots, start=1)
-        ]
-
-        return (
-            "Available new slots:\n\n"
-            + "\n".join(slot_lines)
-            + "\n\nReply with slot number."
-        )
+        return send_available_slots_response(doctor_id, selected_date, doctors, appointments)
 
     if step == "reschedule_slot":
         doctor_id = str(conversations.loc[index, "doctor_id"])
@@ -623,10 +676,12 @@ def process_chat_message(phone, message):
 
         available_slots = get_available_slots(doctor_id, selected_date, doctors, appointments)
 
+        slot_text = ai_slot_number if ai_slot_number else message
+
         try:
-            choice = int(message)
+            choice = int(slot_text)
         except ValueError:
-            return "Please enter a valid slot number."
+            return "Please enter the slot number shown in the list."
 
         if choice < 1 or choice > len(available_slots):
             return "Please choose a valid slot number."
@@ -659,28 +714,28 @@ def process_chat_message(phone, message):
         )
 
     if step == "completed":
-        if message == "1":
+        if intent == "book" or message == "1":
             conversations.loc[index, "step"] = "ask_name"
             conversations.loc[index, "patient_name"] = ""
-            conversations.loc[index, "doctor_id"] = ""
-            conversations.loc[index, "date"] = ""
+            conversations.loc[index, "doctor_id"] = ai_doctor_id if ai_doctor_id else ""
+            conversations.loc[index, "date"] = ai_date if ai_date else ""
             conversations.loc[index, "time"] = ""
             conversations.loc[index, "appointment_id"] = ""
 
             write_all_sheets(patients, doctors, appointments, conversations)
 
-            return "Starting new booking.\nPlease enter your full name."
+            return "Sure, let's book another appointment. Please enter your full name."
 
         return (
             "You already have a booking.\n\n"
-            "Type:\n"
-            "1. Book another appointment\n"
-            "reschedule. Reschedule appointment\n"
-            "cancel. Cancel appointment\n"
-            "menu. Main menu"
+            "You can type:\n"
+            "• book another appointment\n"
+            "• cancel appointment\n"
+            "• reschedule appointment\n"
+            "• menu"
         )
 
-    return "Something went wrong. Type hi to start again."
+    return "Something went wrong. Type menu to start again."
 
 
 @app.route("/")
@@ -807,9 +862,6 @@ def book_appointment():
     if not patient_name or not phone or not doctor_id or not selected_date or not selected_time:
         return jsonify({"success": False, "message": "All fields are required"}), 400
 
-    if not is_valid_date(selected_date):
-        return jsonify({"success": False, "message": "Date must be today or future"}), 400
-
     patients, doctors, appointments, conversations = load_all()
 
     available_slots = get_available_slots(doctor_id, selected_date, doctors, appointments)
@@ -823,13 +875,6 @@ def book_appointment():
         return jsonify({"success": False, "message": "Doctor not found"}), 404
 
     doctor_name = doctor_row.iloc[0]["name"]
-
-    if phone not in patients["phone"].astype(str).values:
-        patients = pd.concat([patients, pd.DataFrame([{
-            "patient_id": next_id(patients, "patient_id"),
-            "name": patient_name,
-            "phone": phone
-        }], dtype=object)], ignore_index=True)
 
     new_appointment = {
         "appointment_id": next_id(appointments, "appointment_id"),
@@ -900,10 +945,7 @@ def complete_appointment(appointment_id):
 
     write_all_sheets(patients, doctors, appointments, conversations)
 
-    msg = (
-        f"Thank you for visiting ABC Clinic, {appt['patient_name']} 😊\n\n"
-        "We hope your consultation went well."
-    )
+    msg = f"Thank you for visiting ABC Clinic, {appt['patient_name']} 😊"
 
     send_whatsapp_message(appt["phone"], msg)
 
