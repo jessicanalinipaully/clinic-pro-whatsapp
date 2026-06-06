@@ -150,13 +150,13 @@ def delete_doctor(doctor_id):
 
     active_appointments = appointments[
         (appointments["doctor_id"].astype(str) == str(doctor_id)) &
-        (appointments["status"].astype(str) == "booked")
+        (appointments["status"].astype(str).isin(["booked", "confirmed"]))
     ]
 
     if not active_appointments.empty:
         return jsonify({
             "success": False,
-            "message": "Cannot delete doctor with active booked appointments"
+            "message": "Cannot delete doctor with active appointments"
         }), 409
 
     doctors = doctors[doctors["doctor_id"].astype(str) != str(doctor_id)]
@@ -207,7 +207,7 @@ def book_appointment():
         (appointments["doctor_id"].astype(str) == doctor_id) &
         (appointments["date"].astype(str) == date) &
         (appointments["time"].astype(str) == time) &
-        (appointments["status"].astype(str) == "booked")
+        (appointments["status"].astype(str).isin(["booked", "confirmed"]))
     ]
 
     if not clash.empty:
@@ -244,6 +244,24 @@ def book_appointment():
         "success": True,
         "message": "Appointment booked successfully",
         "appointment": new_appointment
+    })
+
+
+@app.route("/confirm/<int:appointment_id>", methods=["POST"])
+def confirm_appointment(appointment_id):
+    patients, doctors, appointments, conversations = load_all()
+
+    appointments.loc[
+        appointments["appointment_id"].astype(str) == str(appointment_id),
+        "status"
+    ] = "confirmed"
+
+    write_all_sheets(patients, doctors, appointments, conversations)
+
+    return jsonify({
+        "success": True,
+        "message": "Appointment confirmed successfully",
+        "whatsapp_message": "Your appointment has been confirmed by ABC Clinic."
     })
 
 
@@ -440,7 +458,7 @@ def chat():
             (appointments["doctor_id"].astype(str) == doctor_id) &
             (appointments["date"].astype(str) == date) &
             (appointments["time"].astype(str) == time) &
-            (appointments["status"].astype(str) == "booked")
+            (appointments["status"].astype(str).isin(["booked", "confirmed"]))
         ]
 
         if not clash.empty:

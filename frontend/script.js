@@ -94,6 +94,19 @@ async function bookAppointment() {
   }
 }
 
+async function confirmAppointment(id) {
+  const response = await fetch(`${API_URL}/confirm/${id}`, {
+    method: "POST"
+  });
+
+  const result = await response.json();
+
+  if (result.success) {
+    alert(result.whatsapp_message);
+    loadAppointments();
+  }
+}
+
 async function completeAppointment(id) {
   const response = await fetch(`${API_URL}/complete/${id}`, {
     method: "POST"
@@ -133,6 +146,13 @@ async function loadAppointments() {
     let actionButtons = "Done";
 
     if (app.status === "booked") {
+      actionButtons = `
+        <button onclick="confirmAppointment('${app.appointment_id}')">Confirm</button>
+        <button onclick="cancelAppointment('${app.appointment_id}')">Cancel</button>
+      `;
+    }
+
+    if (app.status === "confirmed") {
       actionButtons = `
         <button onclick="completeAppointment('${app.appointment_id}')">Complete Visit</button>
         <button onclick="cancelAppointment('${app.appointment_id}')">Cancel</button>
