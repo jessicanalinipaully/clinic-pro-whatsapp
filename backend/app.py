@@ -566,6 +566,22 @@ def book_appointment():
 def confirm_appointment(appointment_id):
     patients, doctors, appointments, conversations = load_all()
 
+    selected = appointments[
+        appointments["appointment_id"].astype(str) == str(appointment_id)
+    ]
+
+    if selected.empty:
+        return jsonify({
+            "success": False,
+            "message": "Appointment not found"
+        }), 404
+
+    patient_phone = str(selected.iloc[0]["phone"])
+    patient_name = str(selected.iloc[0]["patient_name"])
+    doctor_name = str(selected.iloc[0]["doctor_name"])
+    date = str(selected.iloc[0]["date"])
+    time = str(selected.iloc[0]["time"])
+
     appointments.loc[
         appointments["appointment_id"].astype(str) == str(appointment_id),
         "status"
@@ -573,16 +589,40 @@ def confirm_appointment(appointment_id):
 
     write_all_sheets(patients, doctors, appointments, conversations)
 
+    whatsapp_message = (
+        "Your appointment has been confirmed ✅\n\n"
+        f"Patient: {patient_name}\n"
+        f"Doctor: {doctor_name}\n"
+        f"Date: {date}\n"
+        f"Time: {time}\n\n"
+        "Thank you for choosing ABC Clinic."
+    )
+
+    send_whatsapp_message(patient_phone, whatsapp_message)
+
     return jsonify({
         "success": True,
         "message": "Appointment confirmed successfully",
-        "whatsapp_message": "Your appointment has been confirmed by ABC Clinic."
+        "whatsapp_message": whatsapp_message
     })
 
 
 @app.route("/complete/<int:appointment_id>", methods=["POST"])
 def complete_appointment(appointment_id):
     patients, doctors, appointments, conversations = load_all()
+
+    selected = appointments[
+        appointments["appointment_id"].astype(str) == str(appointment_id)
+    ]
+
+    if selected.empty:
+        return jsonify({
+            "success": False,
+            "message": "Appointment not found"
+        }), 404
+
+    patient_phone = str(selected.iloc[0]["phone"])
+    patient_name = str(selected.iloc[0]["patient_name"])
 
     appointments.loc[
         appointments["appointment_id"].astype(str) == str(appointment_id),
@@ -591,16 +631,40 @@ def complete_appointment(appointment_id):
 
     write_all_sheets(patients, doctors, appointments, conversations)
 
+    whatsapp_message = (
+        f"Thank you for visiting ABC Clinic, {patient_name} 😊\n\n"
+        "We hope your consultation went well.\n"
+        "Reply anytime to book your next appointment."
+    )
+
+    send_whatsapp_message(patient_phone, whatsapp_message)
+
     return jsonify({
         "success": True,
         "message": "Appointment marked as completed",
-        "whatsapp_message": "Thank you for visiting ABC Clinic. We hope your consultation went well."
+        "whatsapp_message": whatsapp_message
     })
 
 
 @app.route("/cancel/<int:appointment_id>", methods=["POST"])
 def cancel_appointment(appointment_id):
     patients, doctors, appointments, conversations = load_all()
+
+    selected = appointments[
+        appointments["appointment_id"].astype(str) == str(appointment_id)
+    ]
+
+    if selected.empty:
+        return jsonify({
+            "success": False,
+            "message": "Appointment not found"
+        }), 404
+
+    patient_phone = str(selected.iloc[0]["phone"])
+    patient_name = str(selected.iloc[0]["patient_name"])
+    doctor_name = str(selected.iloc[0]["doctor_name"])
+    date = str(selected.iloc[0]["date"])
+    time = str(selected.iloc[0]["time"])
 
     appointments.loc[
         appointments["appointment_id"].astype(str) == str(appointment_id),
@@ -609,9 +673,21 @@ def cancel_appointment(appointment_id):
 
     write_all_sheets(patients, doctors, appointments, conversations)
 
+    whatsapp_message = (
+        "Your appointment has been cancelled ❌\n\n"
+        f"Patient: {patient_name}\n"
+        f"Doctor: {doctor_name}\n"
+        f"Date: {date}\n"
+        f"Time: {time}\n\n"
+        "To book again, please message ABC Clinic."
+    )
+
+    send_whatsapp_message(patient_phone, whatsapp_message)
+
     return jsonify({
         "success": True,
-        "message": "Appointment cancelled successfully"
+        "message": "Appointment cancelled successfully",
+        "whatsapp_message": whatsapp_message
     })
 
 
