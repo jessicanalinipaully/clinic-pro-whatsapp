@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Clinic Appointment Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Clinic Appointment Dashboard</h1>
+
+  <div class="card">
+    <h2>Doctor Management</h2>
+
+    <input id="doctorName" placeholder="Doctor Name">
+    <input id="specialization" placeholder="Specialization">
+
+    <button onclick="addDoctor()">Add Doctor</button>
+
+    <h3>Doctors List</h3>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Doctor</th>
+          <th>Specialization</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="doctorsTable"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Book Appointment</h2>
+
+    <input id="patientName" placeholder="Patient Name">
+    <input id="phone" placeholder="WhatsApp Number">
+
+    <select id="doctor"></select>
+
+    <input id="date" type="date">
+    <input id="time" type="time">
+
+    <button onclick="bookAppointment()">Book Appointment</button>
+
+    <p id="message"></p>
+  </div>
+
+  <div class="card">
+    <h2>Appointments</h2>
+    <button onclick="loadAppointments()">Refresh Appointments</button>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Patient</th>
+          <th>Phone</th>
+          <th>Doctor</th>
+          <th>Date</th>
+          <th>Time</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="appointmentsTable"></tbody>
+    </table>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
