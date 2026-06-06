@@ -3,18 +3,54 @@ body {
   background: #f4f6f8;
   margin: 0;
   padding: 30px;
+  color: #1f2937;
 }
 
 h1 {
   text-align: center;
-  color: #1f2937;
+  color: #111827;
+  margin-bottom: 30px;
+}
+
+h2 {
+  margin-top: 0;
+  color: #111827;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 18px;
+  max-width: 1100px;
+  margin: 0 auto 25px auto;
+}
+
+.stat-card {
+  background: white;
+  padding: 20px;
+  border-radius: 14px;
+  text-align: center;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.08);
+}
+
+.stat-card h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #6b7280;
+}
+
+.stat-card p {
+  font-size: 32px;
+  font-weight: bold;
+  margin: 10px 0 0 0;
+  color: #2563eb;
 }
 
 .card {
   background: white;
   padding: 25px;
   margin: 25px auto;
-  max-width: 1000px;
+  max-width: 1100px;
   border-radius: 14px;
   box-shadow: 0 4px 18px rgba(0,0,0,0.08);
 }
@@ -27,6 +63,14 @@ input, select {
   border: 1px solid #d1d5db;
   border-radius: 8px;
   font-size: 15px;
+  box-sizing: border-box;
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: 2fr 1fr auto;
+  gap: 12px;
+  align-items: center;
 }
 
 button {
@@ -44,6 +88,22 @@ button:hover {
   background: #1d4ed8;
 }
 
+button.danger {
+  background: #dc2626;
+}
+
+button.danger:hover {
+  background: #b91c1c;
+}
+
+button.success {
+  background: #16a34a;
+}
+
+button.success:hover {
+  background: #15803d;
+}
+
 #message {
   font-weight: bold;
   margin-top: 15px;
@@ -53,14 +113,70 @@ table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 15px;
+  overflow: hidden;
 }
 
 th, td {
   border-bottom: 1px solid #e5e7eb;
-  padding: 10px;
+  padding: 12px;
   text-align: left;
+  font-size: 14px;
 }
 
 th {
   background: #f9fafb;
+  color: #374151;
+}
+
+tr:hover {
+  background: #f9fafb;
+}
+
+.badge {
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: bold;
+  text-transform: capitalize;
+}
+
+.badge.booked {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.badge.confirmed {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.badge.completed {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.badge.cancelled {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.done-text {
+  color: #6b7280;
+  font-weight: bold;
+}
+
+.empty {
+  text-align: center;
+  color: #6b7280;
+  padding: 25px;
+}
+
+@media (max-width: 900px) {
+  .stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .filters {
+    grid-template-columns: 1fr;
+  }
 }

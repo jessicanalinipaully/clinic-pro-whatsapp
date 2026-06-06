@@ -1,5 +1,7 @@
 const API_URL = "https://clinic-pro-whatsapp.onrender.com";
 
+let allAppointments = [];
+
 async function loadDoctors() {
   const response = await fetch(`${API_URL}/doctors`);
   const doctors = await response.json();
@@ -21,7 +23,7 @@ async function loadDoctors() {
       <td>${doc.doctor_id}</td>
       <td>${doc.name}</td>
       <td>${doc.specialization}</td>
-      <td><button onclick="deleteDoctor('${doc.doctor_id}')">Delete</button></td>
+      <td><button class="danger" onclick="deleteDoctor('${doc.doctor_id}')">Delete</button></td>
     `;
     doctorsTable.appendChild(row);
   });
@@ -52,6 +54,8 @@ async function addDoctor() {
 }
 
 async function deleteDoctor(id) {
+  if (!confirm("Are you sure you want to delete this doctor?")) return;
+
   const response = await fetch(`${API_URL}/delete-doctor/${id}`, {
     method: "POST"
   });
@@ -104,6 +108,8 @@ async function confirmAppointment(id) {
   if (result.success) {
     alert(result.whatsapp_message);
     loadAppointments();
+  } else {
+    alert(result.message);
   }
 }
 
@@ -117,6 +123,8 @@ async function completeAppointment(id) {
   if (result.success) {
     alert(result.whatsapp_message);
     loadAppointments();
+  } else {
+    alert(result.message);
   }
 }
 
@@ -128,34 +136,93 @@ async function cancelAppointment(id) {
   const result = await response.json();
 
   if (result.success) {
-    alert("Appointment cancelled");
+    alert(result.whatsapp_message || "Appointment cancelled");
     loadAppointments();
+  } else {
+    alert(result.message);
   }
 }
 
 async function loadAppointments() {
   const response = await fetch(`${API_URL}/appointments`);
-  const appointments = await response.json();
+  allAppointments = await response.json();
 
+  updateStats(allAppointments);
+  applyFilters();
+}
+
+function updateStats(appointments) {
+  document.getElementById("totalCount").textContent = appointments.length;
+
+  document.getElementById("bookedCount").textContent =
+    appointments.filter(a => a.status === "booked").length;
+
+  document.getElementById("confirmedCount").textContent =
+    appointments.filter(a => a.status === "confirmed").length;
+
+  document.getElementById("completedCount").textContent =
+    appointments.filter(a => a.status === "completed").length;
+
+  document.getElementById("cancelledCount").textContent =
+    appointments.filter(a => a.status === "cancelled").length;
+}
+
+function applyFilters() {
+  const search = document.getElementById("searchInput").value.toLowerCase();
+  const status = document.getElementById("statusFilter").value;
+
+  let filtered = allAppointments.filter(app => {
+    const text = `
+      ${app.patient_name}
+      ${app.phone}
+      ${app.doctor_name}
+      ${app.date}
+      ${app.time}
+      ${app.status}
+    `.toLowerCase();
+
+    const matchesSearch = text.includes(search);
+    const matchesStatus = status === "all" || app.status === status;
+
+    return matchesSearch && matchesStatus;
+  });
+
+  renderAppointments(filtered);
+}
+
+function getStatusBadge(status) {
+  return `<span class="badge ${status}">${status}</span>`;
+}
+
+function renderAppointments(appointments) {
   const table = document.getElementById("appointmentsTable");
   table.innerHTML = "";
+
+  if (appointments.length === 0) {
+    table.innerHTML = `
+      <tr>
+        <td colspan="8" class="empty">No appointments found</td>
+      </tr>
+    `;
+    return;
+  }
 
   appointments.forEach(app => {
     const row = document.createElement("tr");
 
-    let actionButtons = "Done";
+    let actionButtons = `<span class="done-text">Done</span>`;
 
     if (app.status === "booked") {
       actionButtons = `
         <button onclick="confirmAppointment('${app.appointment_id}')">Confirm</button>
-        <button onclick="cancelAppointment('${app.appointment_id}')">Cancel</button>
+        <button class="danger" onclick="cancelAppointment('${app.appointment_id}')">Cancel</button>
       `;
     }
 
     if (app.status === "confirmed") {
       actionButtons = `
-        <button onclick="completeAppointment('${app.appointment_id}')">Complete Visit</button>
-        <button onclick="cancelAppointment('${app.appointment_id}')">Cancel</button>
+        <button class="success" onclick="completeAppointment('${app.appointment_id}')">Complete</button>
+        <button class="danger" onclick="cancelAppointment('${app.appointment_id}')">Cancel</button>
       `;
     }
 
@@ -166,7 +233,7 @@ async function loadAppointments() {
       <td>${app.doctor_name}</td>
       <td>${app.date}</td>
       <td>${app.time}</td>
-      <td>${app.status}</td>
+      <td>${getStatusBadge(app.status)}</td>
       <td>${actionButtons}</td>
     `;
 

@@ -5,7 +5,30 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>Clinic Appointment Dashboard</h1>
+  <h1>Clinic Admin Dashboard</h1>
+
+  <div class="stats">
+    <div class="stat-card">
+      <h3>Total</h3>
+      <p id="totalCount">0</p>
+    </div>
+    <div class="stat-card">
+      <h3>Booked</h3>
+      <p id="bookedCount">0</p>
+    </div>
+    <div class="stat-card">
+      <h3>Confirmed</h3>
+      <p id="confirmedCount">0</p>
+    </div>
+    <div class="stat-card">
+      <h3>Completed</h3>
+      <p id="completedCount">0</p>
+    </div>
+    <div class="stat-card">
+      <h3>Cancelled</h3>
+      <p id="cancelledCount">0</p>
+    </div>
+  </div>
 
   <div class="card">
     <h2>Doctor Management</h2>
@@ -31,7 +54,7 @@
   </div>
 
   <div class="card">
-    <h2>Book Appointment</h2>
+    <h2>Manual Appointment Booking</h2>
 
     <input id="patientName" placeholder="Patient Name">
     <input id="phone" placeholder="WhatsApp Number">
@@ -48,7 +71,20 @@
 
   <div class="card">
     <h2>Appointments</h2>
-    <button onclick="loadAppointments()">Refresh Appointments</button>
+
+    <div class="filters">
+      <input id="searchInput" placeholder="Search by patient, phone, doctor..." onkeyup="applyFilters()">
+
+      <select id="statusFilter" onchange="applyFilters()">
+        <option value="all">All Status</option>
+        <option value="booked">Booked</option>
+        <option value="confirmed">Confirmed</option>
+        <option value="completed">Completed</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+
+      <button onclick="loadAppointments()">Refresh</button>
+    </div>
 
     <table>
       <thead>
