@@ -277,7 +277,8 @@ def process_chat_message(phone, message):
 
         slot_lines = []
         for i, slot in enumerate(available_slots, start=1):
-            slot_lines.append(f"{i}. {slot}")
+            display_time = datetime.strptime(slot, "%H:%M").strftime("%I:%M %p")
+            slot_lines.append(f"{i}. {display_time}")
 
         return (
             "Available slots:\n\n"
