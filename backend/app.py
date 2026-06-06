@@ -14,7 +14,7 @@ VERIFY_TOKEN = "clinic_verify_123"
 
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
-
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 DEFAULT_SLOTS = [
     "09:00", "09:30", "10:00", "10:30",
@@ -257,7 +257,71 @@ def show_menu():
         "4. Reschedule Appointment\n"
         "5. Cancel Appointment"
     )
+def ask_gemini(user_message, doctors):
+    doctor_list = doctors[["name", "specialization"]].to_dict(orient="records")
 
+    prompt = f"""
+You are an AI receptionist for ABC Clinic.
+
+Available doctors:
+{doctor_list}
+
+User message:
+"{user_message}"
+
+Understand the user's intent.
+
+Return ONLY JSON like this:
+{{
+  "intent": "book" | "cancel" | "reschedule" | "view_doctors" | "clinic_timings" | "doctor_query" | "small_talk" | "unknown",
+  "doctor_specialization": "",
+  "date_text": "",
+  "reply": ""
+}}
+
+Rules:
+- If user wants appointment, intent is book.
+- If user asks for unavailable doctor like psychiatrist, intent is doctor_query.
+- If user says cancel appointment, intent is cancel.
+- If user says reschedule/change/postpone, intent is reschedule.
+- If normal greeting or thanks, intent is small_talk.
+"""
+
+    try:
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": GEMINI_API_KEY
+        }
+
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt}
+                    ]
+                }
+            ]
+        }
+
+        response = requests.post(url, headers=headers, json=payload)
+        data = response.json()
+
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        text = text.replace("```json", "").replace("```", "").strip()
+
+        import json
+        return json.loads(text)
+
+    except Exception as e:
+        print("GEMINI ERROR:", e)
+        return {
+            "intent": "unknown",
+            "doctor_specialization": "",
+            "date_text": "",
+            "reply": ""
+        }
 
 def process_chat_message(phone, message):
     message = str(message).strip()
@@ -284,6 +348,50 @@ def process_chat_message(phone, message):
 
     index = existing.index[0]
     step = str(conversations.loc[index, "step"])
+    ai = ask_gemini(message, doctors)
+    intent = ai.get("intent", "unknown")
+    doctor_specialization = ai.get("doctor_specialization", "").lower()
+
+    if intent == "book" and step == "menu":
+        conversations.loc[index, "step"] = "ask_name"
+        write_all_sheets(patients, doctors, appointments, conversations)
+        return "Sure, I can help you book an appointment. Please enter your full name."
+
+    if intent == "view_doctors" and step == "menu":
+        lines = []
+        for _, doctor in doctors.iterrows():
+            lines.append(f"{doctor['doctor_id']}. {doctor['name']} - {doctor['specialization']}")
+        return "Our doctors are:\n\n" + "\n".join(lines)
+
+    if intent == "clinic_timings" and step == "menu":
+        return (
+            "ABC Clinic Timings:\n\n"
+            "Monday to Saturday\n"
+            "9:00 AM to 6:00 PM\n\n"
+            "Lunch Break: 1:00 PM to 2:00 PM\n"
+            "Sunday closed."
+        )
+
+    if intent == "cancel":
+        return process_chat_message(phone, "cancel")
+
+    if intent == "reschedule":
+        return process_chat_message(phone, "reschedule")
+
+    if intent == "doctor_query":
+        available_specs = doctors["specialization"].astype(str).str.lower().tolist()
+
+        if doctor_specialization and doctor_specialization not in " ".join(available_specs):
+            lines = []
+            for _, doctor in doctors.iterrows():
+                lines.append(f"{doctor['doctor_id']}. {doctor['name']} - {doctor['specialization']}")
+
+            return (
+                f"I'm sorry, we do not have a {doctor_specialization} available right now.\n\n"
+                "Available doctors are:\n\n"
+                + "\n".join(lines)
+                + "\n\nWould you like to continue with one of these doctors?\nReply with the doctor number or type cancel."
+            )
 
     if lower_msg in ["hi", "hello", "menu", "start"]:
         conversations.loc[index, "step"] = "menu"
