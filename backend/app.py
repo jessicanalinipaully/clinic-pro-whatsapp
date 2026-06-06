@@ -1,4 +1,3 @@
-import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import pandas as pd
@@ -6,12 +5,14 @@ import os
 from datetime import datetime
 import random
 import re
+import requests
 
 app = Flask(__name__)
 CORS(app)
 
 EXCEL_FILE = "database.xlsx"
 VERIFY_TOKEN = "clinic_verify_123"
+
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 
@@ -108,19 +109,252 @@ def send_whatsapp_message(to, message):
         "messaging_product": "whatsapp",
         "to": to,
         "type": "text",
-        "text": {
-            "body": message
-        }
+        "text": {"body": message}
     }
 
-    response = requests.post(
-        url,
-        headers=headers,
-        json=payload
-    )
-
+    response = requests.post(url, headers=headers, json=payload)
     print("SEND RESPONSE:", response.status_code)
     print(response.text)
+
+
+def process_chat_message(phone, message):
+    message = str(message).strip()
+    patients, doctors, appointments, conversations = load_all()
+
+    if conversations.empty:
+        conversations = pd.DataFrame({
+            "phone": pd.Series(dtype="object"),
+            "patient_name": pd.Series(dtype="object"),
+            "step": pd.Series(dtype="object"),
+            "otp": pd.Series(dtype="object"),
+            "verified": pd.Series(dtype="object"),
+            "doctor_id": pd.Series(dtype="object"),
+            "date": pd.Series(dtype="object"),
+            "time": pd.Series(dtype="object")
+        })
+
+    existing = conversations[conversations["phone"].astype(str) == str(phone)]
+
+    if existing.empty:
+        new_row = {
+            "phone": phone,
+            "patient_name": "",
+            "step": "menu",
+            "otp": "",
+            "verified": "False",
+            "doctor_id": "",
+            "date": "",
+            "time": ""
+        }
+
+        conversations = pd.concat(
+            [conversations, pd.DataFrame([new_row], dtype=object)],
+            ignore_index=True
+        )
+
+        write_all_sheets(patients, doctors, appointments, conversations)
+
+        return (
+            "Welcome to ABC Clinic 👋\n\n"
+            "Please choose an option:\n"
+            "1. Book Appointment\n"
+            "2. View Doctors\n"
+            "3. Clinic Timings"
+        )
+
+    index = existing.index[0]
+    step = str(conversations.loc[index, "step"])
+
+    if message.lower() in ["hi", "hello", "menu", "start"]:
+        conversations.loc[index, "step"] = "menu"
+        write_all_sheets(patients, doctors, appointments, conversations)
+
+        return (
+            "Welcome to ABC Clinic 👋\n\n"
+            "Please choose an option:\n"
+            "1. Book Appointment\n"
+            "2. View Doctors\n"
+            "3. Clinic Timings"
+        )
+
+    if step == "menu":
+        if message == "1":
+            conversations.loc[index, "step"] = "ask_name"
+            write_all_sheets(patients, doctors, appointments, conversations)
+            return "Great. Please enter your full name."
+
+        if message == "2":
+            doctor_lines = []
+            for _, doctor in doctors.iterrows():
+                doctor_lines.append(
+                    f"{doctor['doctor_id']}. {doctor['name']} - {doctor['specialization']}"
+                )
+
+            return "Our doctors are:\n\n" + "\n".join(doctor_lines)
+
+        if message == "3":
+            return (
+                "ABC Clinic Timings:\n\n"
+                "Monday to Saturday\n"
+                "9:00 AM to 6:00 PM\n\n"
+                "Sunday closed."
+            )
+
+        return (
+            "Please choose a valid option:\n"
+            "1. Book Appointment\n"
+            "2. View Doctors\n"
+            "3. Clinic Timings"
+        )
+
+    if step == "ask_name":
+        otp = str(random.randint(1000, 9999))
+
+        conversations.loc[index, "patient_name"] = message
+        conversations.loc[index, "otp"] = otp
+        conversations.loc[index, "verified"] = "False"
+        conversations.loc[index, "step"] = "ask_otp"
+
+        write_all_sheets(patients, doctors, appointments, conversations)
+
+        return f"Your OTP is {otp}.\nPlease enter this OTP to verify your number."
+
+    if step == "ask_otp":
+        correct_otp = str(conversations.loc[index, "otp"])
+
+        if message != correct_otp:
+            return "Invalid OTP. Please try again."
+
+        conversations.loc[index, "verified"] = "True"
+        conversations.loc[index, "step"] = "ask_doctor"
+
+        doctor_lines = []
+        for _, doctor in doctors.iterrows():
+            doctor_lines.append(
+                f"{doctor['doctor_id']}. {doctor['name']} - {doctor['specialization']}"
+            )
+
+        write_all_sheets(patients, doctors, appointments, conversations)
+
+        return "Number verified ✅\n\nChoose doctor:\n" + "\n".join(doctor_lines)
+
+    if step == "ask_doctor":
+        valid_doctor_ids = doctors["doctor_id"].astype(str).tolist()
+
+        if message not in valid_doctor_ids:
+            return "Please choose a valid doctor number."
+
+        conversations.loc[index, "doctor_id"] = message
+        conversations.loc[index, "step"] = "ask_date"
+
+        write_all_sheets(patients, doctors, appointments, conversations)
+
+        return "Enter appointment date in this format:\nYYYY-MM-DD\nExample: 2026-06-10"
+
+    if step == "ask_date":
+        if not is_valid_date(message):
+            return "Invalid date format.\nPlease enter like this:\nYYYY-MM-DD\nExample: 2026-06-10"
+
+        conversations.loc[index, "date"] = message
+        conversations.loc[index, "step"] = "ask_time"
+
+        write_all_sheets(patients, doctors, appointments, conversations)
+
+        return "Enter appointment time in this format:\nHH:MM\nExample: 10:30"
+
+    if step == "ask_time":
+        if not is_valid_time(message):
+            return "Invalid time format.\nPlease enter like this:\nHH:MM\nExample: 10:30"
+
+        patient_name = str(conversations.loc[index, "patient_name"])
+        doctor_id = str(conversations.loc[index, "doctor_id"])
+        date = str(conversations.loc[index, "date"])
+        time = message
+
+        doctor_row = doctors[doctors["doctor_id"].astype(str) == doctor_id]
+
+        if doctor_row.empty:
+            conversations.loc[index, "step"] = "menu"
+            write_all_sheets(patients, doctors, appointments, conversations)
+            return "Doctor not found. Please type hi to start again."
+
+        doctor_name = doctor_row.iloc[0]["name"]
+
+        clash = appointments[
+            (appointments["doctor_id"].astype(str) == doctor_id) &
+            (appointments["date"].astype(str) == date) &
+            (appointments["time"].astype(str) == time) &
+            (appointments["status"].astype(str).isin(["booked", "confirmed"]))
+        ]
+
+        if not clash.empty:
+            return "Doctor is not free at this time.\nPlease enter another time in HH:MM format."
+
+        new_appointment = {
+            "appointment_id": str(len(appointments) + 1),
+            "patient_name": patient_name,
+            "phone": phone,
+            "doctor_id": doctor_id,
+            "doctor_name": doctor_name,
+            "date": date,
+            "time": time,
+            "status": "booked",
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        appointments = pd.concat(
+            [appointments, pd.DataFrame([new_appointment], dtype=object)],
+            ignore_index=True
+        )
+
+        if phone not in patients["phone"].astype(str).values:
+            new_patient = {
+                "patient_id": str(len(patients) + 1),
+                "name": patient_name,
+                "phone": phone
+            }
+
+            patients = pd.concat(
+                [patients, pd.DataFrame([new_patient], dtype=object)],
+                ignore_index=True
+            )
+
+        conversations.loc[index, "step"] = "completed"
+        conversations.loc[index, "time"] = time
+
+        write_all_sheets(patients, doctors, appointments, conversations)
+
+        return (
+            "Appointment successfully booked ✅\n\n"
+            f"Patient: {patient_name}\n"
+            f"Doctor: {doctor_name}\n"
+            f"Date: {date}\n"
+            f"Time: {time}\n\n"
+            "ABC Clinic will confirm your appointment soon."
+        )
+
+    if step == "completed":
+        if message == "1":
+            conversations.loc[index, "step"] = "ask_name"
+            conversations.loc[index, "patient_name"] = ""
+            conversations.loc[index, "otp"] = ""
+            conversations.loc[index, "verified"] = "False"
+            conversations.loc[index, "doctor_id"] = ""
+            conversations.loc[index, "date"] = ""
+            conversations.loc[index, "time"] = ""
+
+            write_all_sheets(patients, doctors, appointments, conversations)
+
+            return "Starting new booking.\nPlease enter your full name."
+
+        return (
+            "You already have a completed booking.\n\n"
+            "Type:\n"
+            "1. Book another appointment\n"
+            "menu. Main menu"
+        )
+
+    return "Something went wrong. Type hi to start again."
 
 
 @app.route("/")
@@ -143,30 +377,23 @@ def verify_webhook():
 @app.route("/webhook", methods=["POST"])
 def receive_webhook():
     data = request.get_json()
-
     print("WHATSAPP WEBHOOK DATA:", data)
 
     try:
         entry = data["entry"][0]
         changes = entry["changes"][0]
         value = changes["value"]
-
         messages = value.get("messages", [])
 
         if messages:
             phone = messages[0]["from"]
-            text = messages[0]["text"]["body"]
 
-            print("MESSAGE:", text)
+            if "text" in messages[0]:
+                text = messages[0]["text"]["body"]
+                print("MESSAGE:", text)
 
-            reply = (
-                "Welcome to ABC Clinic 👋\n\n"
-                "1. Book Appointment\n"
-                "2. View Doctors\n"
-                "3. Clinic Timings"
-            )
-
-            send_whatsapp_message(phone, reply)
+                reply = process_chat_message(phone, text)
+                send_whatsapp_message(phone, reply)
 
     except Exception as e:
         print("WEBHOOK ERROR:", e)
@@ -192,7 +419,7 @@ def chat():
     phone = str(data.get("phone", "")).strip()
     message = str(data.get("message", "")).strip()
 
-    reply = "WhatsApp webhook is connected. Bot message received."
+    reply = process_chat_message(phone, message)
 
     return jsonify({"reply": reply})
 
