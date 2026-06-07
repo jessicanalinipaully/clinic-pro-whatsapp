@@ -67,16 +67,21 @@ class Conversation(db.Model):
     appointment_id = db.Column(db.String(20), default="")
 
 
+class ProcessedMessage(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.String(200), unique=True, nullable=False)
+    created_at = db.Column(db.String(50), default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
 def init_db():
     db.create_all()
 
     if Doctor.query.count() == 0:
-        doctors = [
+        db.session.add_all([
             Doctor(id=1, name="Dr Priya", specialization="Dermatologist"),
             Doctor(id=2, name="Dr Kumar", specialization="Dentist"),
             Doctor(id=3, name="Dr Mehta", specialization="General Physician"),
-        ]
-        db.session.add_all(doctors)
+        ])
         db.session.commit()
 
 
@@ -100,7 +105,7 @@ def parse_common_date(message):
     msg = message.lower().strip()
     today = date.today()
 
-    if msg in ["today"]:
+    if msg == "today":
         return today.strftime("%Y-%m-%d")
 
     if msg in ["tomorrow", "tmr", "tom"]:
@@ -385,7 +390,6 @@ Rules:
 - Skin/acne/rash/allergy/skin specialist/dermatology -> doctor_id "1".
 - Tooth pain/dental/dentist/cavity -> doctor_id "2".
 - Fever/cough/cold/headache/body pain/general sickness -> doctor_id "3".
-- If user asks for psychiatrist/cardiologist/orthopedic/gynecologist and not available, use doctor_query.
 - Convert natural dates like tomorrow, next Monday, next week Tuesday, 3rd of next month into YYYY-MM-DD.
 - If user says morning/AM, time_period morning.
 - If user says afternoon/evening/PM, time_period afternoon.
@@ -423,7 +427,6 @@ Rules:
             return fallback
 
         text = data["candidates"][0]["content"]["parts"][0]["text"]
-        
         text = text.replace("```json", "").replace("```", "").strip()
 
         ai = json.loads(text)
@@ -449,7 +452,7 @@ def ask_next_missing_info(phone, convo):
     if not convo.doctor_id:
         convo.step = "ask_doctor"
         db.session.commit()
-        return "Which doctor would you like to consult?\n\n" + doctor_list_text()
+        return "Choose doctor:\n\n" + doctor_list_text()
 
     doctor = Doctor.query.get(int(convo.doctor_id))
 
@@ -673,7 +676,6 @@ def process_chat_message(phone, message):
             f"I'm sorry, we do not currently have a {doctor_specialization or 'doctor for that specialty'} available.\n\n"
             "Available doctors are:\n\n"
             + doctor_list_text()
-            + "\n\nWould you like to continue with one of these doctors?"
         )
 
     booking_steps = ["booking", "ask_name", "ask_doctor", "ask_date", "ask_period", "choose_slot"]
@@ -793,6 +795,21 @@ def receive_webhook():
         messages = value.get("messages", [])
 
         if messages:
+            message_id = messages[0].get("id")
+
+            if message_id:
+                already_done = ProcessedMessage.query.filter_by(
+                    message_id=message_id
+                ).first()
+
+                if already_done:
+                    print("DUPLICATE MESSAGE IGNORED:", message_id)
+                    return "EVENT_RECEIVED", 200
+
+                saved_msg = ProcessedMessage(message_id=message_id)
+                db.session.add(saved_msg)
+                db.session.commit()
+
             phone = messages[0]["from"]
             text = ""
 
