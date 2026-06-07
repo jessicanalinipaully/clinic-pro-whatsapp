@@ -7,7 +7,7 @@ from datetime import datetime, date, timedelta
 app = Flask(__name__)
 CORS(app)
 
-EXCEL_FILE = "database_v3.xlsx"
+EXCEL_FILE = "/tmp/clinic_database.xlsx"
 VERIFY_TOKEN = "clinic_verify_123"
 
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
@@ -97,11 +97,15 @@ def load_all():
 
 
 def write_all_sheets(patients, doctors, appointments, conversations):
-    with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
-        patients.astype(object).to_excel(writer, "patients", index=False)
-        doctors.astype(object).to_excel(writer, "doctors", index=False)
-        appointments.astype(object).to_excel(writer, "appointments", index=False)
-        conversations.astype(object).to_excel(writer, "conversations", index=False)
+    temp_file = "/tmp/clinic_database_temp.xlsx"
+
+    with pd.ExcelWriter(temp_file, engine="openpyxl") as writer:
+        patients.astype(object).to_excel(writer, sheet_name="patients", index=False)
+        doctors.astype(object).to_excel(writer, sheet_name="doctors", index=False)
+        appointments.astype(object).to_excel(writer, sheet_name="appointments", index=False)
+        conversations.astype(object).to_excel(writer, sheet_name="conversations", index=False)
+
+    os.replace(temp_file, EXCEL_FILE)
 
 
 def next_id(df, col):
