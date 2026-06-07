@@ -15,7 +15,7 @@ VERIFY_TOKEN = "clinic_verify_123"
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = "gemini-2.0-flash"
+GGEMINI_MODEL = "gemini-2.5-flash-lite"
 
 
 def to_am_pm(time_text):
@@ -231,16 +231,12 @@ def send_whatsapp_slot_list(to, available_slots):
 def show_menu():
     return (
         "Welcome to ABC Clinic 👋\n\n"
-        "You can type naturally, for example:\n"
-        "• I need a skin specialist\n"
-        "• I have tooth pain\n"
-        "• Book appointment tomorrow\n"
-        "• Cancel my appointment\n"
-        "• Reschedule my appointment\n\n"
-        "Or choose:\n"
+        "How can we help you today?\n\n"
         "1. Book Appointment\n"
         "2. View Doctors\n"
-        "3. Clinic Timings"
+        "3. Clinic Timings\n"
+        "4. Cancel Appointment\n"
+        "5. Reschedule Appointment"
     )
 
 
