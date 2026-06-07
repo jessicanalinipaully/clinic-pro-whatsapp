@@ -536,7 +536,7 @@ def process_chat_message(phone, message):
             "Please enter the new date."
         )
 
-    if intent == "clinic_timings" or message == "3":
+    if step == "menu" and (intent == "clinic_timings" or message == "3"):
         return (
             "ABC Clinic Timings:\n\n"
             "Monday to Saturday\n"
@@ -545,7 +545,7 @@ def process_chat_message(phone, message):
             "Sunday closed."
         )
 
-    if intent == "view_doctors" or message == "2":
+    if step == "menu" and (intent == "view_doctors" or message == "2"):
         return "Our doctors are:\n\n" + doctor_list_text(doctors)
 
     if intent == "doctor_query" and not ai_doctor_id:
