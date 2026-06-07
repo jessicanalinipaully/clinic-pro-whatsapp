@@ -415,7 +415,15 @@ Rules:
         r = requests.post(url, headers=headers, json=payload, timeout=20)
         data = r.json()
 
+        print("GEMINI STATUS:", r.status_code)
+        print("GEMINI RESPONSE:", data)
+
+        if "candidates" not in data:
+            print("GEMINI FAILED, USING FALLBACK AI")
+            return fallback
+
         text = data["candidates"][0]["content"]["parts"][0]["text"]
+        
         text = text.replace("```json", "").replace("```", "").strip()
 
         ai = json.loads(text)
