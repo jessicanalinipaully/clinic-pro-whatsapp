@@ -7,7 +7,7 @@ from datetime import datetime, date, timedelta
 app = Flask(__name__)
 CORS(app)
 
-EXCEL_FILE = "database.xlsx"
+EXCEL_FILE = "database_v3.xlsx"
 VERIFY_TOKEN = "clinic_verify_123"
 
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
