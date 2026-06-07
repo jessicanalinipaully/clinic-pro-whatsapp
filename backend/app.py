@@ -5,7 +5,6 @@ import os
 from datetime import datetime, date, timedelta
 import requests
 import json
-import re
 
 app = Flask(__name__)
 CORS(app)
@@ -16,7 +15,6 @@ VERIFY_TOKEN = "clinic_verify_123"
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
 GEMINI_MODEL = "gemini-2.0-flash"
 
 
@@ -34,65 +32,23 @@ def is_valid_date(date_text):
 
 def create_excel_if_missing():
     if not os.path.exists(EXCEL_FILE):
-        patients = pd.DataFrame({
-            "patient_id": [],
-            "name": [],
-            "phone": []
-        })
+        patients = pd.DataFrame(columns=["patient_id", "name", "phone"])
 
         doctors = pd.DataFrame([
-            {
-                "doctor_id": "1",
-                "name": "Dr Priya",
-                "specialization": "Dermatologist",
-                "working_days": "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday",
-                "start_time": "09:00",
-                "end_time": "18:00",
-                "slot_minutes": "30"
-            },
-            {
-                "doctor_id": "2",
-                "name": "Dr Kumar",
-                "specialization": "Dentist",
-                "working_days": "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday",
-                "start_time": "09:00",
-                "end_time": "18:00",
-                "slot_minutes": "30"
-            },
-            {
-                "doctor_id": "3",
-                "name": "Dr Mehta",
-                "specialization": "General Physician",
-                "working_days": "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday",
-                "start_time": "09:00",
-                "end_time": "18:00",
-                "slot_minutes": "30"
-            }
+            {"doctor_id": "1", "name": "Dr Priya", "specialization": "Dermatologist", "working_days": "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday", "start_time": "09:00", "end_time": "18:00", "slot_minutes": "30"},
+            {"doctor_id": "2", "name": "Dr Kumar", "specialization": "Dentist", "working_days": "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday", "start_time": "09:00", "end_time": "18:00", "slot_minutes": "30"},
+            {"doctor_id": "3", "name": "Dr Mehta", "specialization": "General Physician", "working_days": "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday", "start_time": "09:00", "end_time": "18:00", "slot_minutes": "30"},
         ], dtype=object)
 
-        appointments = pd.DataFrame({
-            "appointment_id": [],
-            "patient_name": [],
-            "phone": [],
-            "doctor_id": [],
-            "doctor_name": [],
-            "date": [],
-            "time": [],
-            "status": [],
-            "created_at": [],
-            "reminder_sent": []
-        })
+        appointments = pd.DataFrame(columns=[
+            "appointment_id", "patient_name", "phone", "doctor_id", "doctor_name",
+            "date", "time", "status", "created_at", "reminder_sent"
+        ])
 
-        conversations = pd.DataFrame({
-            "phone": [],
-            "patient_name": [],
-            "step": [],
-            "verified": [],
-            "doctor_id": [],
-            "date": [],
-            "time": [],
-            "appointment_id": []
-        })
+        conversations = pd.DataFrame(columns=[
+            "phone", "patient_name", "step", "verified", "doctor_id",
+            "date", "time", "appointment_id", "time_period"
+        ])
 
         write_all_sheets(patients, doctors, appointments, conversations)
 
@@ -137,8 +93,8 @@ def load_all():
     ])
 
     conversations = ensure_columns(read_sheet("conversations"), [
-        "phone", "patient_name", "step", "verified",
-        "doctor_id", "date", "time", "appointment_id"
+        "phone", "patient_name", "step", "verified", "doctor_id",
+        "date", "time", "appointment_id", "time_period"
     ])
 
     return patients, doctors, appointments, conversations
@@ -161,12 +117,10 @@ def next_id(df, column):
 
 def get_doctor_slots(doctor_id, selected_date, doctors):
     doctor = doctors[doctors["doctor_id"].astype(str) == str(doctor_id)]
-
     if doctor.empty:
         return []
 
     doctor = doctor.iloc[0]
-
     selected_day = datetime.strptime(selected_date, "%Y-%m-%d").strftime("%A")
     working_days = [d.strip() for d in str(doctor["working_days"]).split(",")]
 
@@ -183,10 +137,8 @@ def get_doctor_slots(doctor_id, selected_date, doctors):
 
     while current < end:
         time_value = current.strftime("%H:%M")
-
         if time_value < "13:00" or time_value >= "14:00":
             slots.append(time_value)
-
         current += timedelta(minutes=slot_minutes)
 
     return slots
@@ -207,6 +159,14 @@ def get_available_slots(doctor_id, selected_date, doctors, appointments):
     return [slot for slot in all_slots if slot not in booked_slots]
 
 
+def filter_slots_by_period(slots, period):
+    if period == "morning":
+        return [slot for slot in slots if int(slot.split(":")[0]) < 13]
+    if period == "afternoon":
+        return [slot for slot in slots if int(slot.split(":")[0]) >= 14]
+    return slots
+
+
 def send_whatsapp_message(to, message):
     url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
 
@@ -224,6 +184,48 @@ def send_whatsapp_message(to, message):
 
     response = requests.post(url, headers=headers, json=payload)
     print("SEND RESPONSE:", response.status_code)
+    print(response.text)
+
+
+def send_whatsapp_slot_list(to, available_slots):
+    url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
+
+    rows = []
+    for i, slot in enumerate(available_slots, start=1):
+        rows.append({
+            "id": f"slot_{i}",
+            "title": to_am_pm(slot),
+            "description": "Available appointment slot"
+        })
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": str(to),
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "header": {"type": "text", "text": "Available Slots"},
+            "body": {"text": "Please choose your appointment time:"},
+            "footer": {"text": "ABC Clinic"},
+            "action": {
+                "button": "Choose Time",
+                "sections": [
+                    {
+                        "title": "Available Time Slots",
+                        "rows": rows
+                    }
+                ]
+            }
+        }
+    }
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    response = requests.post(url, headers=headers, json=payload)
+    print("LIST SEND RESPONSE:", response.status_code)
     print(response.text)
 
 
@@ -278,7 +280,7 @@ def fallback_ai(message):
         result["doctor_id"] = "2"
         result["doctor_specialization"] = "Dentist"
 
-    elif any(w in msg for w in ["skin", "rash", "acne", "allergy", "dermatologist", "pimple"]):
+    elif any(w in msg for w in ["skin", "rash", "acne", "allergy", "dermatologist", "pimple", "skin specialist"]):
         result["intent"] = "book"
         result["doctor_id"] = "1"
         result["doctor_specialization"] = "Dermatologist"
@@ -365,9 +367,7 @@ Rules:
             "x-goog-api-key": GEMINI_API_KEY
         }
 
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}]
-        }
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
         response = requests.post(url, headers=headers, json=payload, timeout=20)
         data = response.json()
@@ -388,6 +388,9 @@ Rules:
         if not ai.get("doctor_specialization") and fallback.get("doctor_specialization"):
             ai["doctor_specialization"] = fallback["doctor_specialization"]
 
+        if not ai.get("slot_number") and fallback.get("slot_number"):
+            ai["slot_number"] = fallback["slot_number"]
+
         return ai
 
     except Exception as e:
@@ -396,21 +399,16 @@ Rules:
         return fallback
 
 
-def send_available_slots_response(doctor_id, selected_date, doctors, appointments):
+def send_available_slots_response(doctor_id, selected_date, doctors, appointments, phone=None):
     available_slots = get_available_slots(doctor_id, selected_date, doctors, appointments)
 
     if not available_slots:
         return "No slots available on this date. Please enter another date."
 
-    slot_lines = [
-        f"{i}. {to_am_pm(slot)}"
-        for i, slot in enumerate(available_slots, start=1)
-    ]
-
     return (
-        "Available slots:\n\n"
-        + "\n".join(slot_lines)
-        + "\n\nPlease reply with the slot number."
+        "Which time do you prefer?\n\n"
+        "1. Morning\n"
+        "2. Afternoon"
     )
 
 
@@ -431,7 +429,8 @@ def process_chat_message(phone, message):
             "doctor_id": "",
             "date": "",
             "time": "",
-            "appointment_id": ""
+            "appointment_id": "",
+            "time_period": ""
         }], dtype=object)], ignore_index=True)
 
         write_all_sheets(patients, doctors, appointments, conversations)
@@ -472,7 +471,6 @@ def process_chat_message(phone, message):
         ] = "cancelled"
 
         conversations.loc[index, "step"] = "menu"
-
         write_all_sheets(patients, doctors, appointments, conversations)
 
         return (
@@ -570,9 +568,9 @@ def process_chat_message(phone, message):
             write_all_sheets(patients, doctors, appointments, conversations)
 
             if existing_date and is_valid_date(existing_date):
-                conversations.loc[index, "step"] = "choose_slot"
+                conversations.loc[index, "step"] = "ask_period"
                 write_all_sheets(patients, doctors, appointments, conversations)
-                return send_available_slots_response(existing_doctor_id, existing_date, doctors, appointments)
+                return send_available_slots_response(existing_doctor_id, existing_date, doctors, appointments, phone)
 
             doctor_row = doctors[doctors["doctor_id"].astype(str) == existing_doctor_id].iloc[0]
 
@@ -636,29 +634,64 @@ def process_chat_message(phone, message):
         doctor_id = str(conversations.loc[index, "doctor_id"])
 
         conversations.loc[index, "date"] = selected_date
-        conversations.loc[index, "step"] = "choose_slot"
+        conversations.loc[index, "step"] = "ask_period"
 
         write_all_sheets(patients, doctors, appointments, conversations)
 
-        return send_available_slots_response(doctor_id, selected_date, doctors, appointments)
+        return send_available_slots_response(doctor_id, selected_date, doctors, appointments, phone)
 
-    if step == "choose_slot":
+    if step == "ask_period":
         doctor_id = str(conversations.loc[index, "doctor_id"])
         selected_date = str(conversations.loc[index, "date"])
 
         available_slots = get_available_slots(doctor_id, selected_date, doctors, appointments)
+
+        if message == "1" or "morning" in lower_msg:
+            period = "morning"
+
+        elif message == "2" or "afternoon" in lower_msg:
+            period = "afternoon"
+
+        else:
+            return (
+                "Please choose a time period:\n\n"
+                "1. Morning\n"
+                "2. Afternoon"
+            )
+
+        filtered_slots = filter_slots_by_period(available_slots, period)
+
+        if not filtered_slots:
+            return "No slots available for this time period. Please choose another period."
+
+        conversations.loc[index, "time_period"] = period
+        conversations.loc[index, "step"] = "choose_slot"
+
+        write_all_sheets(patients, doctors, appointments, conversations)
+
+        send_whatsapp_slot_list(phone, filtered_slots)
+
+        return "Please tap Choose Time and select your preferred slot."
+
+    if step == "choose_slot":
+        doctor_id = str(conversations.loc[index, "doctor_id"])
+        selected_date = str(conversations.loc[index, "date"])
+        period = str(conversations.loc[index, "time_period"])
+
+        available_slots = get_available_slots(doctor_id, selected_date, doctors, appointments)
+        filtered_slots = filter_slots_by_period(available_slots, period)
 
         slot_text = ai_slot_number if ai_slot_number else message
 
         try:
             choice = int(slot_text)
         except:
-            return "Please enter the slot number shown in the list."
+            return "Please select a slot from the list."
 
-        if choice < 1 or choice > len(available_slots):
-            return "Please choose a valid slot number."
+        if choice < 1 or choice > len(filtered_slots):
+            return "Please choose a valid slot."
 
-        selected_time = available_slots[choice - 1]
+        selected_time = filtered_slots[choice - 1]
         patient_name = str(conversations.loc[index, "patient_name"])
 
         doctor_row = doctors[doctors["doctor_id"].astype(str) == doctor_id].iloc[0]
@@ -719,55 +752,11 @@ def process_chat_message(phone, message):
         doctor_id = str(conversations.loc[index, "doctor_id"])
 
         conversations.loc[index, "date"] = selected_date
-        conversations.loc[index, "step"] = "reschedule_slot"
+        conversations.loc[index, "step"] = "ask_period"
 
         write_all_sheets(patients, doctors, appointments, conversations)
 
-        return send_available_slots_response(doctor_id, selected_date, doctors, appointments)
-
-    if step == "reschedule_slot":
-        doctor_id = str(conversations.loc[index, "doctor_id"])
-        selected_date = str(conversations.loc[index, "date"])
-        appointment_id = str(conversations.loc[index, "appointment_id"])
-
-        available_slots = get_available_slots(doctor_id, selected_date, doctors, appointments)
-
-        slot_text = ai_slot_number if ai_slot_number else message
-
-        try:
-            choice = int(slot_text)
-        except:
-            return "Please enter the slot number shown in the list."
-
-        if choice < 1 or choice > len(available_slots):
-            return "Please choose a valid slot number."
-
-        selected_time = available_slots[choice - 1]
-
-        appointments.loc[
-            appointments["appointment_id"].astype(str) == appointment_id,
-            "date"
-        ] = selected_date
-
-        appointments.loc[
-            appointments["appointment_id"].astype(str) == appointment_id,
-            "time"
-        ] = selected_time
-
-        appointments.loc[
-            appointments["appointment_id"].astype(str) == appointment_id,
-            "status"
-        ] = "booked"
-
-        conversations.loc[index, "step"] = "completed"
-
-        write_all_sheets(patients, doctors, appointments, conversations)
-
-        return (
-            "Appointment rescheduled successfully ✅\n\n"
-            f"New Date: {selected_date}\n"
-            f"New Time: {to_am_pm(selected_time)}"
-        )
+        return send_available_slots_response(doctor_id, selected_date, doctors, appointments, phone)
 
     if step == "completed":
         if intent == "book" or message == "1":
@@ -777,6 +766,7 @@ def process_chat_message(phone, message):
             conversations.loc[index, "date"] = ai_date if ai_date else ""
             conversations.loc[index, "time"] = ""
             conversations.loc[index, "appointment_id"] = ""
+            conversations.loc[index, "time_period"] = ""
 
             write_all_sheets(patients, doctors, appointments, conversations)
 
@@ -822,11 +812,21 @@ def receive_webhook():
 
         if messages:
             phone = messages[0]["from"]
+            text = ""
 
             if "text" in messages[0]:
                 text = messages[0]["text"]["body"]
-                print("MESSAGE:", text)
 
+            elif "interactive" in messages[0]:
+                interactive = messages[0]["interactive"]
+
+                if interactive["type"] == "list_reply":
+                    selected_id = interactive["list_reply"]["id"]
+                    text = selected_id.replace("slot_", "")
+
+            print("MESSAGE:", text)
+
+            if text:
                 reply = process_chat_message(phone, text)
                 send_whatsapp_message(phone, reply)
 
@@ -903,6 +903,53 @@ def delete_doctor(doctor_id):
     write_all_sheets(patients, doctors, appointments, conversations)
 
     return jsonify({"success": True, "message": "Doctor deleted"})
+
+
+@app.route("/book", methods=["POST"])
+def book_appointment():
+    data = request.json
+
+    patient_name = str(data.get("patient_name", "")).strip()
+    phone = str(data.get("phone", "")).strip()
+    doctor_id = str(data.get("doctor_id", "")).strip()
+    selected_date = str(data.get("date", "")).strip()
+    selected_time = str(data.get("time", "")).strip()
+
+    if not patient_name or not phone or not doctor_id or not selected_date or not selected_time:
+        return jsonify({"success": False, "message": "All fields are required"}), 400
+
+    patients, doctors, appointments, conversations = load_all()
+
+    available_slots = get_available_slots(doctor_id, selected_date, doctors, appointments)
+
+    if selected_time not in available_slots:
+        return jsonify({"success": False, "message": "This slot is not available"}), 409
+
+    doctor_row = doctors[doctors["doctor_id"].astype(str) == doctor_id]
+
+    if doctor_row.empty:
+        return jsonify({"success": False, "message": "Doctor not found"}), 404
+
+    doctor_name = doctor_row.iloc[0]["name"]
+
+    new_appointment = {
+        "appointment_id": next_id(appointments, "appointment_id"),
+        "patient_name": patient_name,
+        "phone": phone,
+        "doctor_id": doctor_id,
+        "doctor_name": doctor_name,
+        "date": selected_date,
+        "time": selected_time,
+        "status": "booked",
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "reminder_sent": "False"
+    }
+
+    appointments = pd.concat([appointments, pd.DataFrame([new_appointment], dtype=object)], ignore_index=True)
+
+    write_all_sheets(patients, doctors, appointments, conversations)
+
+    return jsonify({"success": True, "message": "Appointment booked", "appointment": new_appointment})
 
 
 @app.route("/confirm/<int:appointment_id>", methods=["POST"])
