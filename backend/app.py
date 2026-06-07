@@ -856,4 +856,4 @@ def reset_chat(phone):
 
 if __name__ == "__main__":
     create_excel_if_missing()
-    app.run(debug=True, port=5055)
+    app.run(debug=True, port=5055)# force redeploy
