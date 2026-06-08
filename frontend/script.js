@@ -207,6 +207,26 @@ function renderAppointments(appointments) {
     return;
   }
 
+  // Sort appointments: Active (booked/confirmed) first.
+  // Within active: earliest date & time first (ascending chronological).
+  // Within inactive (completed/cancelled): latest date & time first (descending chronological).
+  appointments.sort((a, b) => {
+    const aActive = a.status === "booked" || a.status === "confirmed";
+    const bActive = b.status === "booked" || b.status === "confirmed";
+
+    if (aActive && !bActive) return -1;
+    if (!aActive && bActive) return 1;
+
+    const dateTimeA = `${a.date} ${a.time}`;
+    const dateTimeB = `${b.date} ${b.time}`;
+
+    if (aActive) {
+      return dateTimeA.localeCompare(dateTimeB);
+    } else {
+      return dateTimeB.localeCompare(dateTimeA);
+    }
+  });
+
   appointments.forEach(app => {
     const row = document.createElement("tr");
 

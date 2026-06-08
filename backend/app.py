@@ -467,6 +467,25 @@ def ask_next_missing_info(phone, convo):
         db.session.commit()
         return "Please enter your full name."
 
+    if convo.patient_name and not convo.appointment_id:
+        existing = Appointment.query.filter(
+            Appointment.phone == str(phone),
+            db.func.lower(Appointment.patient_name) == convo.patient_name.lower().strip(),
+            Appointment.status.in_(["booked", "confirmed"])
+        ).first()
+        if existing:
+            convo.patient_name = ""
+            convo.step = "menu"
+            db.session.commit()
+            return (
+                f"You already have an active appointment under the name '{existing.patient_name}'.\n\n"
+                "You can:\n"
+                "• cancel appointment\n"
+                "• reschedule appointment\n"
+                "• book an appointment under a different name\n"
+                "• menu"
+            )
+
     if not convo.doctor_id:
         convo.step = "ask_doctor"
         db.session.commit()

@@ -1,106 +1,162 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Clinic Appointment Dashboard</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clinic Admin Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>Clinic Admin Dashboard</h1>
+  <div class="dashboard-container">
+    <!-- Sidebar Controls -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-icon">🩺</span>
+        <div class="brand-details">
+          <h2>ClinicPro</h2>
+          <p>Admin Portal v2.0</p>
+        </div>
+      </div>
 
-  <div class="stats">
-    <div class="stat-card">
-      <h3>Total</h3>
-      <p id="totalCount">0</p>
-    </div>
-    <div class="stat-card">
-      <h3>Booked</h3>
-      <p id="bookedCount">0</p>
-    </div>
-    <div class="stat-card">
-      <h3>Confirmed</h3>
-      <p id="confirmedCount">0</p>
-    </div>
-    <div class="stat-card">
-      <h3>Completed</h3>
-      <p id="completedCount">0</p>
-    </div>
-    <div class="stat-card">
-      <h3>Cancelled</h3>
-      <p id="cancelledCount">0</p>
-    </div>
-  </div>
+      <!-- Doctor Management Card -->
+      <div class="sidebar-card">
+        <h3>Doctor Management</h3>
+        <div class="form-group">
+          <input id="doctorName" type="text" placeholder="Doctor Name">
+          <input id="specialization" type="text" placeholder="Specialization">
+          <button class="btn-primary btn-block" onclick="addDoctor()">Add Doctor</button>
+        </div>
 
-  <div class="card">
-    <h2>Doctor Management</h2>
+        <h4 class="section-title">Doctors List</h4>
+        <div class="table-wrapper mini-table">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Doctor</th>
+                <th>Specialization</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="doctorsTable"></tbody>
+          </table>
+        </div>
+      </div>
 
-    <input id="doctorName" placeholder="Doctor Name">
-    <input id="specialization" placeholder="Specialization">
+      <!-- Manual Appointment Booking Card -->
+      <div class="sidebar-card">
+        <h3>Manual Booking</h3>
+        <div class="form-group">
+          <input id="patientName" type="text" placeholder="Patient Name">
+          <input id="phone" type="text" placeholder="WhatsApp Number">
+          <select id="doctor"></select>
+          <div class="datetime-grid">
+            <input id="date" type="date">
+            <input id="time" type="time">
+          </div>
+          <button class="btn-success btn-block" onclick="bookAppointment()">Book Appointment</button>
+        </div>
+        <p id="message"></p>
+      </div>
+    </aside>
 
-    <button onclick="addDoctor()">Add Doctor</button>
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Header -->
+      <header class="main-header">
+        <div class="header-title">
+          <h1>Clinic Appointments</h1>
+          <p>Real-time booking and scheduling management</p>
+        </div>
+        <div class="header-actions">
+          <button class="btn-outline" onclick="loadAppointments()">
+            <span class="icon">🔄</span> Refresh Data
+          </button>
+        </div>
+      </header>
 
-    <h3>Doctors List</h3>
+      <!-- Stats Grid -->
+      <section class="stats-grid">
+        <div class="stat-card total">
+          <div class="stat-icon">📋</div>
+          <div class="stat-info">
+            <h3>Total Bookings</h3>
+            <p id="totalCount">0</p>
+          </div>
+        </div>
+        <div class="stat-card booked">
+          <div class="stat-icon">🔔</div>
+          <div class="stat-info">
+            <h3>Pending Booked</h3>
+            <p id="bookedCount">0</p>
+          </div>
+        </div>
+        <div class="stat-card confirmed">
+          <div class="stat-icon">✅</div>
+          <div class="stat-info">
+            <h3>Confirmed</h3>
+            <p id="confirmedCount">0</p>
+          </div>
+        </div>
+        <div class="stat-card completed">
+          <div class="stat-icon">✨</div>
+          <div class="stat-info">
+            <h3>Completed</h3>
+            <p id="completedCount">0</p>
+          </div>
+        </div>
+        <div class="stat-card cancelled">
+          <div class="stat-icon">❌</div>
+          <div class="stat-info">
+            <h3>Cancelled</h3>
+            <p id="cancelledCount">0</p>
+          </div>
+        </div>
+      </section>
 
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Doctor</th>
-          <th>Specialization</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody id="doctorsTable"></tbody>
-    </table>
-  </div>
+      <!-- Appointments List Card -->
+      <section class="appointments-section">
+        <div class="content-card">
+          <div class="card-header">
+            <h2>Active Appointments</h2>
+            <div class="filters">
+              <div class="search-box">
+                <span class="search-icon">🔍</span>
+                <input id="searchInput" type="text" placeholder="Search patient, phone, doctor..." onkeyup="applyFilters()">
+              </div>
+              <select id="statusFilter" onchange="applyFilters()">
+                <option value="all">All Statuses</option>
+                <option value="booked">Booked</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+          </div>
 
-  <div class="card">
-    <h2>Manual Appointment Booking</h2>
-
-    <input id="patientName" placeholder="Patient Name">
-    <input id="phone" placeholder="WhatsApp Number">
-
-    <select id="doctor"></select>
-
-    <input id="date" type="date">
-    <input id="time" type="time">
-
-    <button onclick="bookAppointment()">Book Appointment</button>
-
-    <p id="message"></p>
-  </div>
-
-  <div class="card">
-    <h2>Appointments</h2>
-
-    <div class="filters">
-      <input id="searchInput" placeholder="Search by patient, phone, doctor..." onkeyup="applyFilters()">
-
-      <select id="statusFilter" onchange="applyFilters()">
-        <option value="all">All Status</option>
-        <option value="booked">Booked</option>
-        <option value="confirmed">Confirmed</option>
-        <option value="completed">Completed</option>
-        <option value="cancelled">Cancelled</option>
-      </select>
-
-      <button onclick="loadAppointments()">Refresh</button>
-    </div>
-
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Patient</th>
-          <th>Phone</th>
-          <th>Doctor</th>
-          <th>Date</th>
-          <th>Time</th>
-          <th>Status</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody id="appointmentsTable"></tbody>
-    </table>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Patient</th>
+                  <th>WhatsApp Phone</th>
+                  <th>Doctor</th>
+                  <th>Appointment Date</th>
+                  <th>Scheduled Time</th>
+                  <th>Status</th>
+                  <th style="width: 200px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="appointmentsTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
   </div>
 
   <script src="script.js"></script>
