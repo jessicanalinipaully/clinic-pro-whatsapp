@@ -572,7 +572,11 @@ def process_chat_message(phone, message):
         convo.step = "menu"
         db.session.commit()
         return show_menu()
-
+    # PERMANENT FIX:
+    # If user is selecting a time slot, do NOT call Gemini.
+    # Otherwise slot number like 3 can be misunderstood as doctor_id 3.
+    if step == "choose_slot":
+        return book_or_reschedule_slot(phone, convo, message)
     ai = ask_ai(message, step)
 
     intent = ai.get("intent", "unknown")
@@ -690,7 +694,7 @@ def process_chat_message(phone, message):
             if patient_name and step != "ask_name":
                 convo.patient_name = patient_name
 
-            if doctor_id and step not in ["ask_name"]:
+            if doctor_id and step not in ["ask_name", "choose_slot"]:
                 convo.doctor_id = doctor_id
 
             if date_iso and is_valid_date(date_iso):
