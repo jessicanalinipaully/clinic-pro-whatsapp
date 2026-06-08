@@ -169,6 +169,19 @@ def reset_conversation_booking(convo):
     convo.appointment_id = ""
 
 
+def clear_conversation_state(phone):
+    convo = Conversation.query.filter_by(phone=str(phone)).first()
+
+    if convo:
+        convo.patient_name = ""
+        convo.step = "menu"
+        convo.doctor_id = ""
+        convo.date = ""
+        convo.time_period = ""
+        convo.appointment_id = ""
+        db.session.commit()
+
+
 def active_appointments(phone):
     return Appointment.query.filter(
         Appointment.phone == str(phone),
@@ -599,9 +612,8 @@ def process_chat_message(phone, message):
                 return "Appointment not found."
 
             appt.status = "cancelled"
-            convo.step = "menu"
-            convo.appointment_id = ""
             db.session.commit()
+            clear_conversation_state(phone)
 
             return (
                 "Your appointment has been cancelled ❌\n\n"
@@ -733,6 +745,11 @@ def process_chat_message(phone, message):
         return ask_next_missing_info(phone, convo)
 
     if step == "completed":
+        if "book" in lower or "appointment" in lower or lower in ["1", "new booking"]:
+            reset_conversation_booking(convo)
+            db.session.commit()
+            return ask_next_missing_info(phone, convo)
+
         return (
             "You already have a booking.\n\n"
             "You can type:\n"
@@ -961,6 +978,7 @@ def cancel_appointment(appointment_id):
 
     appt.status = "cancelled"
     db.session.commit()
+    clear_conversation_state(appt.phone)
 
     msg = (
         "Your appointment has been cancelled ❌\n\n"
@@ -983,6 +1001,7 @@ def complete_appointment(appointment_id):
 
     appt.status = "completed"
     db.session.commit()
+    clear_conversation_state(appt.phone)
 
     msg = f"Thank you for visiting ABC Clinic, {appt.patient_name} 😊"
     send_whatsapp_message(appt.phone, msg)
