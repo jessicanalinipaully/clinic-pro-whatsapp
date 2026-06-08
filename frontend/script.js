@@ -194,72 +194,201 @@ function getStatusBadge(status) {
   return `<span class="badge ${status}">${status}</span>`;
 }
 
+function formatDateHeader(dateStr) {
+  try {
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    const d = new Date(parts[0], parts[1] - 1, parts[2]);
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const dTime = d.getTime();
+    const todayTime = today.getTime();
+    const tomorrowTime = tomorrow.getTime();
+    
+    const options = { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' };
+    const formatted = d.toLocaleDateString('en-US', options);
+    
+    if (dTime === todayTime) {
+      return `📅 Today — ${formatted}`;
+    } else if (dTime === tomorrowTime) {
+      return `🌅 Tomorrow — ${formatted}`;
+    }
+    return `🗓️ ${formatted}`;
+  } catch (e) {
+    return dateStr;
+  }
+}
+
+function to12Hour(timeStr) {
+  try {
+    const parts = timeStr.split(':');
+    let hour = parseInt(parts[0], 10);
+    const minute = parts[1];
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    hour = hour % 12;
+    hour = hour ? hour : 12;
+    return `${hour}:${minute} ${ampm}`;
+  } catch (e) {
+    return timeStr;
+  }
+}
+
+function updateHeaderDate() {
+  const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+  const todayStr = new Date().toLocaleDateString('en-US', options);
+  const display = document.getElementById("currentDateDisplay");
+  if (display) {
+    display.innerHTML = `Real-time booking & scheduling • <strong>${todayStr}</strong>`;
+  }
+}
+
 function renderAppointments(appointments) {
-  const table = document.getElementById("appointmentsTable");
-  table.innerHTML = "";
+  const container = document.getElementById("appointmentsContainer");
+  container.innerHTML = "";
 
   if (appointments.length === 0) {
-    table.innerHTML = `
-      <tr>
-        <td colspan="8" class="empty">No appointments found</td>
-      </tr>
-    `;
+    container.innerHTML = `<div class="empty">No appointments found</div>`;
     return;
   }
 
-  // Sort appointments: Active (booked/confirmed) first.
-  // Within active: earliest date & time first (ascending chronological).
-  // Within inactive (completed/cancelled): latest date & time first (descending chronological).
-  appointments.sort((a, b) => {
-    const aActive = a.status === "booked" || a.status === "confirmed";
-    const bActive = b.status === "booked" || b.status === "confirmed";
+  // Split active and inactive
+  const active = appointments.filter(a => a.status === "booked" || a.status === "confirmed");
+  const inactive = appointments.filter(a => a.status === "completed" || a.status === "cancelled");
 
-    if (aActive && !bActive) return -1;
-    if (!aActive && bActive) return 1;
-
-    const dateTimeA = `${a.date} ${a.time}`;
-    const dateTimeB = `${b.date} ${b.time}`;
-
-    if (aActive) {
-      return dateTimeA.localeCompare(dateTimeB);
-    } else {
-      return dateTimeB.localeCompare(dateTimeA);
-    }
+  // Sort active: ascending chronological (earliest first)
+  active.sort((a, b) => {
+    return `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`);
   });
 
-  appointments.forEach(app => {
-    const row = document.createElement("tr");
+  // Sort inactive: descending chronological (most recent first)
+  inactive.sort((a, b) => {
+    return `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`);
+  });
 
-    let actionButtons = `<span class="done-text">Done</span>`;
+  // Render Active Grouped by Date
+  if (active.length > 0) {
+    const dateGroups = {};
+    active.forEach(app => {
+      if (!dateGroups[app.date]) dateGroups[app.date] = [];
+      dateGroups[app.date].push(app);
+    });
 
-    if (app.status === "booked") {
-      actionButtons = `
-        <button onclick="confirmAppointment('${app.appointment_id}')">Confirm</button>
-        <button class="danger" onclick="cancelAppointment('${app.appointment_id}')">Cancel</button>
+    const sortedDates = Object.keys(dateGroups).sort();
+
+    sortedDates.forEach(date => {
+      const groupApps = dateGroups[date];
+      
+      const groupDiv = document.createElement("div");
+      groupDiv.className = "date-group";
+      
+      groupDiv.innerHTML = `
+        <div class="date-group-header">
+          <span>${formatDateHeader(date)}</span>
+          <span class="badge-count">${groupApps.length} appointment${groupApps.length > 1 ? 's' : ''}</span>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 80px;">ID</th>
+                <th style="width: 120px;">Time</th>
+                <th>Patient</th>
+                <th>WhatsApp Phone</th>
+                <th>Doctor</th>
+                <th>Status</th>
+                <th style="width: 200px; text-align: right; padding-right: 24px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       `;
-    }
+      
+      const tbody = groupDiv.querySelector("tbody");
+      groupApps.forEach(app => {
+        const row = document.createElement("tr");
+        
+        let actionButtons = "";
+        if (app.status === "booked") {
+          actionButtons = `
+            <button onclick="confirmAppointment('${app.appointment_id}')">Confirm</button>
+            <button class="danger" onclick="cancelAppointment('${app.appointment_id}')">Cancel</button>
+          `;
+        } else if (app.status === "confirmed") {
+          actionButtons = `
+            <button class="success" onclick="completeAppointment('${app.appointment_id}')">Complete</button>
+            <button class="danger" onclick="cancelAppointment('${app.appointment_id}')">Cancel</button>
+          `;
+        }
 
-    if (app.status === "confirmed") {
-      actionButtons = `
-        <button class="success" onclick="completeAppointment('${app.appointment_id}')">Complete</button>
-        <button class="danger" onclick="cancelAppointment('${app.appointment_id}')">Cancel</button>
-      `;
-    }
+        row.innerHTML = `
+          <td><strong>#${app.appointment_id}</strong></td>
+          <td><strong>${to12Hour(app.time)}</strong></td>
+          <td>${app.patient_name}</td>
+          <td>${app.phone}</td>
+          <td>${app.doctor_name}</td>
+          <td>${getStatusBadge(app.status)}</td>
+          <td style="text-align: right; padding-right: 24px;">${actionButtons}</td>
+        `;
+        tbody.appendChild(row);
+      });
+      
+      container.appendChild(groupDiv);
+    });
+  }
 
-    row.innerHTML = `
-      <td>${app.appointment_id}</td>
-      <td>${app.patient_name}</td>
-      <td>${app.phone}</td>
-      <td>${app.doctor_name}</td>
-      <td>${app.date}</td>
-      <td>${app.time}</td>
-      <td>${getStatusBadge(app.status)}</td>
-      <td>${actionButtons}</td>
+  // Render Inactive History List at the bottom
+  if (inactive.length > 0) {
+    const historyDiv = document.createElement("div");
+    historyDiv.className = "date-group";
+    
+    historyDiv.innerHTML = `
+      <div class="date-group-header" style="color: var(--text-secondary); background-color: #f1f5f9; border-top: 2px solid var(--border-color);">
+        <span>📜 Past & Completed History</span>
+        <span class="badge-count" style="background-color: #e2e8f0; color: var(--text-secondary);">${inactive.length} item${inactive.length > 1 ? 's' : ''}</span>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 80px;">ID</th>
+              <th style="width: 150px;">Date</th>
+              <th style="width: 120px;">Time</th>
+              <th>Patient</th>
+              <th>WhatsApp Phone</th>
+              <th>Doctor</th>
+              <th>Status</th>
+              <th style="width: 200px; text-align: right; padding-right: 24px;">Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
     `;
-
-    table.appendChild(row);
-  });
+    
+    const tbody = historyDiv.querySelector("tbody");
+    inactive.forEach(app => {
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>#${app.appointment_id}</td>
+        <td>${app.date}</td>
+        <td>${to12Hour(app.time)}</td>
+        <td>${app.patient_name}</td>
+        <td>${app.phone}</td>
+        <td>${app.doctor_name}</td>
+        <td>${getStatusBadge(app.status)}</td>
+        <td style="text-align: right; padding-right: 24px;"><span class="done-text">Archived</span></td>
+      `;
+      tbody.appendChild(row);
+    });
+    
+    container.appendChild(historyDiv);
+  }
 }
 
+// Initialization
+updateHeaderDate();
 loadDoctors();
 loadAppointments();

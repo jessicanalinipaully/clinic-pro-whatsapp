@@ -520,3 +520,38 @@ tr:hover td {
     width: 100%;
   }
 }
+
+.date-group {
+  margin-bottom: 24px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  background-color: #ffffff;
+}
+
+.date-group-header {
+  background-color: #f8fafc;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--primary);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.date-group-header span.badge-count {
+  background-color: var(--primary-light);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 9999px;
+}
+
+.header-title p strong {
+  color: var(--primary);
+  font-weight: 600;
+}
