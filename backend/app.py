@@ -306,6 +306,167 @@ def send_whatsapp_slot_list(to, slots):
     print("LIST RESPONSE:", r.status_code, r.text)
 
 
+def send_whatsapp_menu(to):
+    rows = [
+        {"id": "menu_1", "title": "Book Appointment", "description": "Schedule a new consultation"},
+        {"id": "menu_2", "title": "View Doctors", "description": "Browse our medical team"},
+        {"id": "menu_3", "title": "Clinic Timings", "description": "Check our opening hours"},
+        {"id": "menu_4", "title": "Cancel Appointment", "description": "Cancel your existing booking"},
+        {"id": "menu_5", "title": "Reschedule Appointment", "description": "Change date/time of booking"}
+    ]
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": str(to),
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "header": {"type": "text", "text": "Clinic Menu"},
+            "body": {"text": "Welcome to ABC Clinic 👋\n\nHow can we help you today?"},
+            "footer": {"text": "ABC Clinic"},
+            "action": {
+                "button": "Select Option",
+                "sections": [
+                    {
+                        "title": "Available Actions",
+                        "rows": rows
+                    }
+                ]
+            }
+        }
+    }
+    
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
+    r = requests.post(url, headers=headers, json=payload)
+    print("MENU RESPONSE:", r.status_code, r.text)
+
+
+def send_whatsapp_doctor_list(to):
+    try:
+        doctors = Doctor.query.order_by(Doctor.id).all()
+    except Exception:
+        doctors = []
+    
+    rows = []
+    for doc in doctors:
+        rows.append({
+            "id": f"doctor_{doc.id}",
+            "title": doc.name,
+            "description": doc.specialization
+        })
+        
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": str(to),
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "header": {"type": "text", "text": "Select Doctor"},
+            "body": {"text": "Please select a doctor to book your appointment with:"},
+            "footer": {"text": "ABC Clinic"},
+            "action": {
+                "button": "Choose Doctor",
+                "sections": [
+                    {
+                        "title": "Our Medical Specialists",
+                        "rows": rows
+                    }
+                ]
+            }
+        }
+    }
+    
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
+    r = requests.post(url, headers=headers, json=payload)
+    print("DOCTOR LIST RESPONSE:", r.status_code, r.text)
+
+
+def send_whatsapp_period_buttons(to):
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": str(to),
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {"text": "Please choose your preferred time period:"},
+            "action": {
+                "buttons": [
+                    {
+                        "type": "reply",
+                        "reply": {
+                            "id": "period_1",
+                            "title": "Morning"
+                        }
+                    },
+                    {
+                        "type": "reply",
+                        "reply": {
+                            "id": "period_2",
+                            "title": "Afternoon"
+                        }
+                    }
+                ]
+            }
+        }
+    }
+    
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
+    r = requests.post(url, headers=headers, json=payload)
+    print("PERIOD BUTTONS RESPONSE:", r.status_code, r.text)
+
+
+def send_whatsapp_cancel_buttons(to, appt_details):
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": str(to),
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {
+                "text": f"Are you sure you want to cancel this appointment?\n\n{appt_details}"
+            },
+            "action": {
+                "buttons": [
+                    {
+                        "type": "reply",
+                        "reply": {
+                            "id": "cancel_1",
+                            "title": "Yes, cancel"
+                        }
+                    },
+                    {
+                        "type": "reply",
+                        "reply": {
+                            "id": "cancel_2",
+                            "title": "No, keep it"
+                        }
+                    }
+                ]
+            }
+        }
+    }
+    
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
+    r = requests.post(url, headers=headers, json=payload)
+    print("CANCEL BUTTONS RESPONSE:", r.status_code, r.text)
+
+
 def fallback_ai(message):
     msg = message.lower().strip()
 
@@ -888,11 +1049,53 @@ def receive_webhook():
             elif "interactive" in messages[0]:
                 interactive = messages[0]["interactive"]
                 if interactive["type"] == "list_reply":
-                    text = interactive["list_reply"]["id"].replace("slot_", "")
+                    list_reply = interactive["list_reply"]
+                    list_id = list_reply["id"]
+                    
+                    if list_id.startswith("slot_"):
+                        text = list_id.replace("slot_", "")
+                    elif list_id.startswith("doctor_"):
+                        text = list_id.replace("doctor_", "")
+                    elif list_id.startswith("menu_"):
+                        text = list_id.replace("menu_", "")
+                    else:
+                        text = list_id
+                        
+                elif interactive["type"] == "button_reply":
+                    button_reply = interactive["button_reply"]
+                    button_id = button_reply["id"]
+                    
+                    if button_id.startswith("period_"):
+                        text = button_id.replace("period_", "")
+                    elif button_id.startswith("cancel_"):
+                        text = button_id.replace("cancel_", "")
+                    elif button_id.startswith("menu_"):
+                        text = button_id.replace("menu_", "")
+                    else:
+                        text = button_id
 
             if text:
                 reply = process_chat_message(phone, text)
-                send_whatsapp_message(phone, reply)
+                
+                # Fetch fresh convo to check step status
+                convo = get_or_create_conversation(phone)
+                
+                if convo.step == "menu":
+                    send_whatsapp_menu(phone)
+                elif convo.step == "ask_doctor":
+                    send_whatsapp_doctor_list(phone)
+                elif convo.step == "ask_period":
+                    send_whatsapp_period_buttons(phone)
+                elif convo.step == "confirm_cancel":
+                    active = active_appointments(phone)
+                    if active:
+                        appt = active[-1]
+                        details = f"Doctor: {appt.doctor_name}\nDate: {appt.date}\nTime: {to_am_pm(appt.time)}"
+                        send_whatsapp_cancel_buttons(phone, details)
+                    else:
+                        send_whatsapp_message(phone, reply)
+                else:
+                    send_whatsapp_message(phone, reply)
 
     except Exception as e:
         print("WEBHOOK ERROR:", e)
