@@ -723,8 +723,16 @@ def process_chat_message(phone, message):
     booking_steps = ["booking", "ask_name", "ask_doctor", "ask_date", "ask_period", "choose_slot"]
 
     if intent == "book" or step in booking_steps or (step == "menu" and message == "1"):
-        if step == "completed" or (step == "menu" and message == "1"):
+        # Always reset when starting a new booking from menu or completed
+        if step in ["completed", "menu"]:
             reset_conversation_booking(convo)
+            # Pre-fill doctor/date/period from AI (NOT name — always ask fresh)
+            if doctor_id:
+                convo.doctor_id = doctor_id
+            if date_iso and is_valid_date(date_iso):
+                convo.date = date_iso
+            if period in ["morning", "afternoon"]:
+                convo.time_period = period
 
         else:
             convo.step = "booking"
@@ -772,15 +780,9 @@ def process_chat_message(phone, message):
         return ask_next_missing_info(phone, convo)
 
     if step == "completed":
-        if "book" in lower or "appointment" in lower or lower in ["1", "new booking"]:
-            reset_conversation_booking(convo)
-            db.session.commit()
-            return ask_next_missing_info(phone, convo)
-
         return (
             "You already have a booking.\n\n"
             "You can type:\n"
-            "• book another appointment\n"
             "• cancel appointment\n"
             "• reschedule appointment\n"
             "• menu"
