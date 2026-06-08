@@ -220,6 +220,11 @@ def get_doctor_slots(doctor_id, selected_date):
 def get_available_slots(doctor_id, selected_date):
     all_slots = get_doctor_slots(doctor_id, selected_date)
 
+    # Filter out past slots if the date is today
+    if selected_date == date.today().strftime("%Y-%m-%d"):
+        now_time = datetime.now().strftime("%H:%M")
+        all_slots = [s for s in all_slots if s > now_time]
+
     booked = Appointment.query.filter(
         Appointment.doctor_id == int(doctor_id),
         Appointment.date == selected_date,
@@ -467,7 +472,16 @@ def ask_next_missing_info(phone, convo):
         db.session.commit()
         return "Choose doctor:\n\n" + doctor_list_text()
 
-    doctor = Doctor.query.get(int(convo.doctor_id))
+    try:
+        doctor = Doctor.query.get(int(convo.doctor_id))
+    except (ValueError, TypeError):
+        doctor = None
+
+    if not doctor:
+        convo.doctor_id = ""
+        convo.step = "ask_doctor"
+        db.session.commit()
+        return "That doctor is no longer available. Please choose another:\n\n" + doctor_list_text()
 
     if not convo.date or not is_valid_date(convo.date):
         convo.step = "ask_date"
@@ -500,7 +514,16 @@ def ask_next_missing_info(phone, convo):
 
 
 def book_or_reschedule_slot(phone, convo, slot_number):
-    doctor = Doctor.query.get(int(convo.doctor_id))
+    try:
+        doctor = Doctor.query.get(int(convo.doctor_id))
+    except (ValueError, TypeError):
+        doctor = None
+
+    if not doctor:
+        convo.step = "ask_doctor"
+        convo.doctor_id = ""
+        db.session.commit()
+        return "Something went wrong. Please choose a doctor:\n\n" + doctor_list_text()
 
     available = get_available_slots(convo.doctor_id, convo.date)
     filtered = filter_slots(available, convo.time_period)
@@ -527,11 +550,11 @@ def book_or_reschedule_slot(phone, convo, slot_number):
         start_msg = "Appointment rescheduled successfully ✅"
 
     else:
-        existing = Appointment.query.filter_by(
-            doctor_id=int(convo.doctor_id),
-            date=convo.date,
-            time=selected_time,
-            status="booked",
+        existing = Appointment.query.filter(
+            Appointment.doctor_id == int(convo.doctor_id),
+            Appointment.date == convo.date,
+            Appointment.time == selected_time,
+            Appointment.status.in_(["booked", "confirmed"])
         ).first()
 
         if existing:
@@ -603,7 +626,10 @@ def process_chat_message(phone, message):
 
     if step == "confirm_cancel":
         if cancel_confirmation == "yes" or message == "1":
-            appt = Appointment.query.get(int(convo.appointment_id))
+            try:
+                appt = Appointment.query.get(int(convo.appointment_id))
+            except (ValueError, TypeError):
+                appt = None
 
             if not appt:
                 convo.step = "menu"
@@ -697,7 +723,7 @@ def process_chat_message(phone, message):
     booking_steps = ["booking", "ask_name", "ask_doctor", "ask_date", "ask_period", "choose_slot"]
 
     if intent == "book" or step in booking_steps or (step == "menu" and message == "1"):
-        if step == "menu" and message == "1":
+        if step == "completed" or (step == "menu" and message == "1"):
             reset_conversation_booking(convo)
 
         else:
@@ -719,7 +745,8 @@ def process_chat_message(phone, message):
             convo.patient_name = message
 
         if step == "ask_doctor":
-            if message in ["1", "2", "3"]:
+            valid_ids = [str(d.id) for d in Doctor.query.all()]
+            if message in valid_ids:
                 convo.doctor_id = message
             elif doctor_id:
                 convo.doctor_id = doctor_id
@@ -929,6 +956,9 @@ def manual_book():
         return jsonify({"success": False, "message": "Slot not available"}), 409
 
     doctor = Doctor.query.get(int(doctor_id))
+
+    if not doctor:
+        return jsonify({"success": False, "message": "Doctor not found"}), 404
 
     appt = Appointment(
         patient_name=patient_name,
