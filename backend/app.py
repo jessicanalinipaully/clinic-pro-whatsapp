@@ -720,7 +720,7 @@ def process_chat_message(phone, message):
     convo = get_or_create_conversation(phone)
     step = convo.step
 
-    if lower in ["hi", "hello", "menu", "start"]:
+    if lower in ["hi", "hello", "hey", "menu", "start"]:
         convo.step = "menu"
         db.session.commit()
         return action("menu")
@@ -733,7 +733,7 @@ def process_chat_message(phone, message):
     if lower in ["menu_doctors", "2"]:
         convo.step = "menu"
         db.session.commit()
-        return action("doctors")
+        return action("text", "Our doctors are:\n\n" + doctor_list_text())
 
     if lower in ["menu_timings", "3"]:
         convo.step = "menu"
