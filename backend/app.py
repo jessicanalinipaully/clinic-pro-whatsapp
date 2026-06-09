@@ -616,6 +616,22 @@ def ask_next_missing_info(phone, convo):
         db.session.commit()
         return action("period")
 
+    doctor = Doctor.query.get(int(convo.doctor_id))
+    selected_day = datetime.strptime(convo.date, "%Y-%m-%d").strftime("%A")
+    working_days = [d.strip() for d in doctor.working_days.split(",")]
+
+    if selected_day not in working_days:
+        convo.date = ""
+        convo.time_period = ""
+        convo.step = "ask_date"
+        db.session.commit()
+
+        return action(
+            "text",
+            f"Sorry, {doctor.name} is not available on {selected_day}s.\n\n"
+            "Please choose another date.\n"
+            "Example: tomorrow / next Monday / 2026-06-10"
+        )
     available = get_available_slots(convo.doctor_id, convo.date)
     filtered = filter_slots(available, convo.time_period)
 
