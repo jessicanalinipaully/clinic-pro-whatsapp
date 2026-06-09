@@ -89,8 +89,24 @@ with app.app_context():
     init_db()
 
 
+def action(kind, text=""):
+    return {"kind": kind, "text": text}
+
+
 def to_am_pm(t):
     return datetime.strptime(str(t), "%H:%M").strftime("%I:%M %p")
+
+
+def normalize_time_id(value):
+    value = str(value).strip()
+
+    if value.startswith("slot_"):
+        raw = value.replace("slot_", "")
+        if len(raw) == 4 and raw.isdigit():
+            return raw[:2] + ":" + raw[2:]
+        return raw
+
+    return value
 
 
 def is_valid_date(d):
@@ -125,8 +141,10 @@ def parse_common_date(message):
         if day_name in msg:
             current = today.weekday()
             diff = day_num - current
+
             if diff <= 0 or "next" in msg:
                 diff += 7
+
             return (today + timedelta(days=diff)).strftime("%Y-%m-%d")
 
     return ""
@@ -135,18 +153,6 @@ def parse_common_date(message):
 def doctor_list_text():
     doctors = Doctor.query.order_by(Doctor.id).all()
     return "\n".join([f"{d.id}. {d.name} - {d.specialization}" for d in doctors])
-
-
-def show_menu():
-    return (
-        "Welcome to ABC Clinic 👋\n\n"
-        "How can we help you today?\n\n"
-        "1. Book Appointment\n"
-        "2. View Doctors\n"
-        "3. Clinic Timings\n"
-        "4. Cancel Appointment\n"
-        "5. Reschedule Appointment"
-    )
 
 
 def get_or_create_conversation(phone):
@@ -220,7 +226,6 @@ def get_doctor_slots(doctor_id, selected_date):
 def get_available_slots(doctor_id, selected_date):
     all_slots = get_doctor_slots(doctor_id, selected_date)
 
-    # Filter out past slots if the date is today
     if selected_date == date.today().strftime("%Y-%m-%d"):
         now_time = datetime.now().strftime("%H:%M")
         all_slots = [s for s in all_slots if s > now_time]
@@ -247,6 +252,9 @@ def filter_slots(slots, period):
 
 
 def send_whatsapp_message(to, msg):
+    if not msg:
+        return
+
     url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
 
     payload = {
@@ -265,54 +273,13 @@ def send_whatsapp_message(to, msg):
     print("SEND RESPONSE:", r.status_code, r.text)
 
 
-def send_whatsapp_slot_list(to, slots):
-    rows = []
-
-    for i, slot in enumerate(slots[:10], start=1):
-        rows.append({
-            "id": f"slot_{i}",
-            "title": to_am_pm(slot),
-            "description": "Available appointment slot",
-        })
-
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": str(to),
-        "type": "interactive",
-        "interactive": {
-            "type": "list",
-            "header": {"type": "text", "text": "Available Slots"},
-            "body": {"text": "Please choose your appointment time:"},
-            "footer": {"text": "ABC Clinic"},
-            "action": {
-                "button": "Choose Time",
-                "sections": [
-                    {
-                        "title": "Available Time Slots",
-                        "rows": rows,
-                    }
-                ],
-            },
-        },
-    }
-
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
-    url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
-    r = requests.post(url, headers=headers, json=payload)
-    print("LIST RESPONSE:", r.status_code, r.text)
-
-
 def send_whatsapp_menu(to):
     rows = [
-        {"id": "menu_1", "title": "Book Appointment", "description": "Schedule a new consultation"},
-        {"id": "menu_2", "title": "View Doctors", "description": "Browse our medical team"},
-        {"id": "menu_3", "title": "Clinic Timings", "description": "Check our opening hours"},
-        {"id": "menu_4", "title": "Cancel Appointment", "description": "Cancel your existing booking"},
-        {"id": "menu_5", "title": "Reschedule Appointment", "description": "Change date/time of booking"}
+        {"id": "menu_book", "title": "Book Appointment", "description": "Schedule a new consultation"},
+        {"id": "menu_doctors", "title": "View Doctors", "description": "Browse our medical team"},
+        {"id": "menu_timings", "title": "Clinic Timings", "description": "Check opening hours"},
+        {"id": "menu_cancel", "title": "Cancel Appointment", "description": "Cancel your booking"},
+        {"id": "menu_reschedule", "title": "Reschedule", "description": "Change appointment date/time"},
     ]
 
     payload = {
@@ -326,39 +293,33 @@ def send_whatsapp_menu(to):
             "footer": {"text": "ABC Clinic"},
             "action": {
                 "button": "Select Option",
-                "sections": [
-                    {
-                        "title": "Available Actions",
-                        "rows": rows
-                    }
-                ]
-            }
-        }
+                "sections": [{"title": "Available Actions", "rows": rows}]
+            },
+        },
     }
-    
+
     headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
         "Content-Type": "application/json",
     }
+
     url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
     r = requests.post(url, headers=headers, json=payload)
     print("MENU RESPONSE:", r.status_code, r.text)
 
 
 def send_whatsapp_doctor_list(to):
-    try:
-        doctors = Doctor.query.order_by(Doctor.id).all()
-    except Exception:
-        doctors = []
-    
-    rows = []
-    for doc in doctors:
-        rows.append({
+    doctors = Doctor.query.order_by(Doctor.id).all()
+
+    rows = [
+        {
             "id": f"doctor_{doc.id}",
-            "title": doc.name,
-            "description": doc.specialization
-        })
-        
+            "title": doc.name[:24],
+            "description": doc.specialization[:72],
+        }
+        for doc in doctors
+    ]
+
     payload = {
         "messaging_product": "whatsapp",
         "to": str(to),
@@ -366,24 +327,20 @@ def send_whatsapp_doctor_list(to):
         "interactive": {
             "type": "list",
             "header": {"type": "text", "text": "Select Doctor"},
-            "body": {"text": "Please select a doctor to book your appointment with:"},
+            "body": {"text": "Please select a doctor for your appointment:"},
             "footer": {"text": "ABC Clinic"},
             "action": {
                 "button": "Choose Doctor",
-                "sections": [
-                    {
-                        "title": "Our Medical Specialists",
-                        "rows": rows
-                    }
-                ]
-            }
-        }
+                "sections": [{"title": "Doctors", "rows": rows}]
+            },
+        },
     }
-    
+
     headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
         "Content-Type": "application/json",
     }
+
     url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
     r = requests.post(url, headers=headers, json=payload)
     print("DOCTOR LIST RESPONSE:", r.status_code, r.text)
@@ -399,35 +356,24 @@ def send_whatsapp_period_buttons(to):
             "body": {"text": "Please choose your preferred time period:"},
             "action": {
                 "buttons": [
-                    {
-                        "type": "reply",
-                        "reply": {
-                            "id": "period_1",
-                            "title": "Morning"
-                        }
-                    },
-                    {
-                        "type": "reply",
-                        "reply": {
-                            "id": "period_2",
-                            "title": "Afternoon"
-                        }
-                    }
+                    {"type": "reply", "reply": {"id": "period_morning", "title": "Morning"}},
+                    {"type": "reply", "reply": {"id": "period_afternoon", "title": "Afternoon"}},
                 ]
-            }
-        }
+            },
+        },
     }
-    
+
     headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
         "Content-Type": "application/json",
     }
+
     url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
     r = requests.post(url, headers=headers, json=payload)
-    print("PERIOD BUTTONS RESPONSE:", r.status_code, r.text)
+    print("PERIOD RESPONSE:", r.status_code, r.text)
 
 
-def send_whatsapp_cancel_buttons(to, appt_details):
+def send_whatsapp_cancel_buttons(to, details):
     payload = {
         "messaging_product": "whatsapp",
         "to": str(to),
@@ -435,36 +381,62 @@ def send_whatsapp_cancel_buttons(to, appt_details):
         "interactive": {
             "type": "button",
             "body": {
-                "text": f"Are you sure you want to cancel this appointment?\n\n{appt_details}"
+                "text": f"Are you sure you want to cancel this appointment?\n\n{details}"
             },
             "action": {
                 "buttons": [
-                    {
-                        "type": "reply",
-                        "reply": {
-                            "id": "cancel_1",
-                            "title": "Yes, cancel"
-                        }
-                    },
-                    {
-                        "type": "reply",
-                        "reply": {
-                            "id": "cancel_2",
-                            "title": "No, keep it"
-                        }
-                    }
+                    {"type": "reply", "reply": {"id": "cancel_yes", "title": "Yes, cancel"}},
+                    {"type": "reply", "reply": {"id": "cancel_no", "title": "No, keep it"}},
                 ]
-            }
-        }
+            },
+        },
     }
-    
+
     headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
         "Content-Type": "application/json",
     }
+
     url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
     r = requests.post(url, headers=headers, json=payload)
     print("CANCEL BUTTONS RESPONSE:", r.status_code, r.text)
+
+
+def send_whatsapp_slot_list(to, slots):
+    rows = []
+
+    for slot in slots[:10]:
+        slot_id = slot.replace(":", "")
+        rows.append({
+            "id": f"slot_{slot_id}",
+            "title": to_am_pm(slot),
+            "description": "Available appointment slot",
+        })
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": str(to),
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "header": {"type": "text", "text": "Available Slots"},
+            "body": {"text": "Please choose your appointment time:"},
+            "footer": {"text": "ABC Clinic"},
+            "action": {
+                "button": "Choose Time",
+                "sections": [{"title": "Available Time Slots", "rows": rows}],
+            },
+        },
+    }
+
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
+    r = requests.post(url, headers=headers, json=payload)
+    print("SLOT LIST RESPONSE:", r.status_code, r.text)
 
 
 def fallback_ai(message):
@@ -482,11 +454,9 @@ def fallback_ai(message):
     }
 
     parsed_date = parse_common_date(message)
+
     if parsed_date:
         result["date_iso"] = parsed_date
-
-    if msg.isdigit():
-        result["slot_number"] = msg
 
     if any(x in msg for x in ["tooth", "teeth", "dental", "dentist", "cavity", "gum"]):
         result["intent"] = "book"
@@ -509,16 +479,22 @@ def fallback_ai(message):
     if any(x in msg for x in ["reschedule", "postpone", "change appointment", "move appointment"]):
         result["intent"] = "reschedule"
 
+    if any(x in msg for x in ["doctor", "doctors", "specialist"]):
+        result["intent"] = "view_doctors"
+
+    if any(x in msg for x in ["timing", "time", "open", "close", "hours"]):
+        result["intent"] = "clinic_timings"
+
     if any(x in msg for x in ["morning", "am"]):
         result["time_period"] = "morning"
 
     if any(x in msg for x in ["afternoon", "evening", "pm"]):
         result["time_period"] = "afternoon"
 
-    if msg in ["yes", "yes cancel", "1"]:
+    if msg in ["yes", "yes cancel"]:
         result["cancel_confirmation"] = "yes"
 
-    if msg in ["no", "keep", "keep appointment", "2"]:
+    if msg in ["no", "keep", "keep appointment"]:
         result["cancel_confirmation"] = "no"
 
     return result
@@ -531,6 +507,7 @@ def ask_ai(message, step):
         return fallback
 
     doctors = Doctor.query.order_by(Doctor.id).all()
+
     doctor_data = [
         {
             "doctor_id": str(d.id),
@@ -546,7 +523,7 @@ You are an AI receptionist for ABC Clinic.
 Today is {date.today().strftime("%Y-%m-%d")}.
 Current conversation step is: {step}
 
-Available doctors:
+Doctors:
 {doctor_data}
 
 User message:
@@ -564,17 +541,6 @@ Return ONLY valid JSON:
   "cancel_confirmation": "yes" | "no" | "",
   "answer": ""
 }}
-
-Rules:
-- Skin/acne/rash/allergy/skin specialist/dermatology -> doctor_id "1".
-- Tooth pain/dental/dentist/cavity -> doctor_id "2".
-- Fever/cough/cold/headache/body pain/general sickness -> doctor_id "3".
-- Convert natural dates like tomorrow, next Monday, next week Tuesday, 3rd of next month into YYYY-MM-DD.
-- If user says morning/AM, time_period morning.
-- If user says afternoon/evening/PM, time_period afternoon.
-- If user gives name during ask_name, put patient_name.
-- If user selects slot number, put slot_number.
-- If user confirms cancellation, put cancel_confirmation yes or no.
 """
 
     try:
@@ -586,13 +552,7 @@ Rules:
         }
 
         payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt}
-                    ]
-                }
-            ]
+            "contents": [{"parts": [{"text": prompt}]}]
         }
 
         r = requests.post(url, headers=headers, json=payload, timeout=20)
@@ -609,7 +569,6 @@ Rules:
         text = text.replace("```json", "").replace("```", "").strip()
 
         ai = json.loads(text)
-        print("AI RESPONSE:", ai)
 
         for key in fallback:
             if not ai.get(key) and fallback.get(key):
@@ -626,47 +585,27 @@ def ask_next_missing_info(phone, convo):
     if not convo.patient_name:
         convo.step = "ask_name"
         db.session.commit()
-        return "Please enter your full name."
-
-    if convo.patient_name and not convo.appointment_id:
-        existing = Appointment.query.filter(
-            Appointment.phone == str(phone),
-            db.func.lower(Appointment.patient_name) == convo.patient_name.lower().strip(),
-            Appointment.status.in_(["booked", "confirmed"])
-        ).first()
-        if existing:
-            convo.patient_name = ""
-            convo.step = "menu"
-            db.session.commit()
-            return (
-                f"You already have an active appointment under the name '{existing.patient_name}'.\n\n"
-                "You can:\n"
-                "• cancel appointment\n"
-                "• reschedule appointment\n"
-                "• book an appointment under a different name\n"
-                "• menu"
-            )
+        return action("text", "Please enter your full name.")
 
     if not convo.doctor_id:
         convo.step = "ask_doctor"
         db.session.commit()
-        return "Choose doctor:\n\n" + doctor_list_text()
+        return action("doctors")
 
-    try:
-        doctor = Doctor.query.get(int(convo.doctor_id))
-    except (ValueError, TypeError):
-        doctor = None
+    doctor = Doctor.query.get(int(convo.doctor_id))
 
     if not doctor:
         convo.doctor_id = ""
         convo.step = "ask_doctor"
         db.session.commit()
-        return "That doctor is no longer available. Please choose another:\n\n" + doctor_list_text()
+        return action("doctors")
 
     if not convo.date or not is_valid_date(convo.date):
         convo.step = "ask_date"
         db.session.commit()
-        return (
+
+        return action(
+            "text",
             f"Perfect. {doctor.name} ({doctor.specialization}) is selected.\n\n"
             "Please tell me the appointment date.\n"
             "Example: tomorrow / next Monday / 2026-06-10"
@@ -675,7 +614,7 @@ def ask_next_missing_info(phone, convo):
     if not convo.time_period:
         convo.step = "ask_period"
         db.session.commit()
-        return "Which time do you prefer?\n\n1. Morning\n2. Afternoon"
+        return action("period")
 
     available = get_available_slots(convo.doctor_id, convo.date)
     filtered = filter_slots(available, convo.time_period)
@@ -684,64 +623,58 @@ def ask_next_missing_info(phone, convo):
         convo.time_period = ""
         convo.step = "ask_period"
         db.session.commit()
-        return "No slots available for that time period. Please choose:\n\n1. Morning\n2. Afternoon"
+
+        return action(
+            "text",
+            "No slots available for that time period. Please choose another time period."
+        )
 
     convo.step = "choose_slot"
     db.session.commit()
 
-    send_whatsapp_slot_list(phone, filtered)
-    return "Please tap Choose Time and select your preferred slot."
+    return action("slots", filtered)
 
 
-def book_or_reschedule_slot(phone, convo, slot_number):
-    try:
-        doctor = Doctor.query.get(int(convo.doctor_id))
-    except (ValueError, TypeError):
-        doctor = None
+def book_or_reschedule_slot(phone, convo, selected_slot):
+    selected_slot = normalize_time_id(selected_slot)
+
+    doctor = Doctor.query.get(int(convo.doctor_id))
 
     if not doctor:
         convo.step = "ask_doctor"
         convo.doctor_id = ""
         db.session.commit()
-        return "Something went wrong. Please choose a doctor:\n\n" + doctor_list_text()
+        return action("doctors")
 
     available = get_available_slots(convo.doctor_id, convo.date)
     filtered = filter_slots(available, convo.time_period)
 
-    try:
-        choice = int(slot_number)
-    except Exception:
-        return "Please select a slot from the list."
+    if selected_slot.isdigit():
+        index = int(selected_slot) - 1
+        if index < 0 or index >= len(filtered):
+            return action("text", "Please choose a valid slot.")
+        selected_time = filtered[index]
+    else:
+        selected_time = selected_slot
 
-    if choice < 1 or choice > len(filtered):
-        return "Please choose a valid slot."
-
-    selected_time = filtered[choice - 1]
+    if selected_time not in filtered:
+        return action("text", "That slot is no longer available. Please choose again.")
 
     if convo.appointment_id:
         appt = Appointment.query.get(int(convo.appointment_id))
 
         if not appt:
-            return "Appointment not found."
+            return action("text", "Appointment not found.")
 
+        appt.doctor_id = int(convo.doctor_id)
+        appt.doctor_name = doctor.name
         appt.date = convo.date
         appt.time = selected_time
         appt.status = "booked"
+
         start_msg = "Appointment rescheduled successfully ✅"
 
     else:
-        existing = Appointment.query.filter(
-            Appointment.doctor_id == int(convo.doctor_id),
-            Appointment.date == convo.date,
-            Appointment.time == selected_time,
-            Appointment.status.in_(["booked", "confirmed"])
-        ).first()
-
-        if existing:
-            convo.step = "ask_period"
-            db.session.commit()
-            return "Sorry, that slot just got booked. Please choose another time period."
-
         appt = Appointment(
             patient_name=convo.patient_name,
             phone=str(phone),
@@ -754,9 +687,11 @@ def book_or_reschedule_slot(phone, convo, slot_number):
 
         db.session.add(appt)
         db.session.flush()
+
         start_msg = "Appointment successfully booked ✅"
 
     patient = Patient.query.filter_by(phone=str(phone)).first()
+
     if not patient:
         patient = Patient(name=convo.patient_name, phone=str(phone))
         db.session.add(patient)
@@ -766,7 +701,8 @@ def book_or_reschedule_slot(phone, convo, slot_number):
 
     db.session.commit()
 
-    return (
+    return action(
+        "text",
         f"{start_msg}\n\n"
         f"Patient: {convo.patient_name}\n"
         f"Doctor: {doctor.name}\n"
@@ -787,80 +723,51 @@ def process_chat_message(phone, message):
     if lower in ["hi", "hello", "menu", "start"]:
         convo.step = "menu"
         db.session.commit()
-        return show_menu()
-    # PERMANENT FIX:
-    # If user is selecting a time slot, do NOT call Gemini.
-    # Otherwise slot number like 3 can be misunderstood as doctor_id 3.
-    if step == "choose_slot":
-        return book_or_reschedule_slot(phone, convo, message)
-    ai = ask_ai(message, step)
+        return action("menu")
 
-    intent = ai.get("intent", "unknown")
-    doctor_id = str(ai.get("doctor_id", "")).strip()
-    date_iso = str(ai.get("date_iso", "")).strip()
-    period = str(ai.get("time_period", "")).strip()
-    slot_number = str(ai.get("slot_number", "")).strip()
-    patient_name = str(ai.get("patient_name", "")).strip()
-    cancel_confirmation = str(ai.get("cancel_confirmation", "")).strip()
-    doctor_specialization = str(ai.get("doctor_specialization", "")).strip()
+    if lower in ["menu_book", "1"]:
+        reset_conversation_booking(convo)
+        db.session.commit()
+        return ask_next_missing_info(phone, convo)
 
-    if step == "confirm_cancel":
-        if cancel_confirmation == "yes" or message == "1":
-            try:
-                appt = Appointment.query.get(int(convo.appointment_id))
-            except (ValueError, TypeError):
-                appt = None
+    if lower in ["menu_doctors", "2"]:
+        convo.step = "menu"
+        db.session.commit()
+        return action("doctors")
 
-            if not appt:
-                convo.step = "menu"
-                convo.appointment_id = ""
-                db.session.commit()
-                return "Appointment not found."
+    if lower in ["menu_timings", "3"]:
+        convo.step = "menu"
+        db.session.commit()
+        return action(
+            "text",
+            "ABC Clinic Timings:\n\n"
+            "Monday to Saturday\n"
+            "9:00 AM to 6:00 PM\n\n"
+            "Lunch: 1:00 PM to 2:00 PM\n"
+            "Sunday closed."
+        )
 
-            appt.status = "cancelled"
-            db.session.commit()
-            clear_conversation_state(phone)
-
-            return (
-                "Your appointment has been cancelled ❌\n\n"
-                f"Doctor: {appt.doctor_name}\n"
-                f"Date: {appt.date}\n"
-                f"Time: {to_am_pm(appt.time)}"
-            )
-
-        if cancel_confirmation == "no" or message == "2":
-            convo.step = "completed"
-            db.session.commit()
-            return "Okay, your appointment remains booked ✅"
-
-        return "Please confirm:\n\n1. Yes, cancel appointment\n2. No, keep appointment"
-
-    if intent == "cancel" or (step == "menu" and message == "4"):
+    if lower in ["menu_cancel", "4", "cancel appointment"]:
         active = active_appointments(phone)
 
         if not active:
             convo.step = "menu"
             db.session.commit()
-            return "You do not have any active appointment to cancel."
+            return action("text", "You do not have any active appointment to cancel.")
 
         appt = active[-1]
         convo.step = "confirm_cancel"
         convo.appointment_id = str(appt.id)
         db.session.commit()
 
-        return (
-            "Are you sure you want to cancel this appointment?\n\n"
-            f"Doctor: {appt.doctor_name}\n"
-            f"Date: {appt.date}\n"
-            f"Time: {to_am_pm(appt.time)}\n\n"
-            "Reply:\n1. Yes, cancel appointment\n2. No, keep appointment"
-        )
+        details = f"Doctor: {appt.doctor_name}\nDate: {appt.date}\nTime: {to_am_pm(appt.time)}"
+        return action("cancel", details)
 
-    if intent == "reschedule" or (step == "menu" and message == "5"):
+    if lower in ["menu_reschedule", "5", "reschedule appointment"]:
         active = active_appointments(phone)
 
         if not active:
-            return "You do not have any active appointment to reschedule."
+            return action("text", "You do not have any active appointment to reschedule.")
 
         appt = active[-1]
 
@@ -872,7 +779,8 @@ def process_chat_message(phone, message):
         convo.time_period = ""
         db.session.commit()
 
-        return (
+        return action(
+            "text",
             "Okay, let's reschedule your appointment.\n\n"
             f"Current appointment:\n"
             f"Doctor: {appt.doctor_name}\n"
@@ -881,86 +789,109 @@ def process_chat_message(phone, message):
             "Please tell me the new date."
         )
 
-    if step == "menu" and (intent == "clinic_timings" or message == "3"):
-        return (
-            "ABC Clinic Timings:\n\n"
-            "Monday to Saturday\n"
-            "9:00 AM to 6:00 PM\n\n"
-            "Lunch: 1:00 PM to 2:00 PM\n"
-            "Sunday closed."
-        )
+    if step == "confirm_cancel":
+        if lower in ["cancel_yes", "yes", "yes cancel", "1"]:
+            appt = Appointment.query.get(int(convo.appointment_id))
 
-    if step == "menu" and (intent == "view_doctors" or message == "2"):
-        return "Our doctors are:\n\n" + doctor_list_text()
+            if not appt:
+                clear_conversation_state(phone)
+                return action("text", "Appointment not found.")
 
-    if intent == "doctor_query" and not doctor_id:
-        return (
-            f"I'm sorry, we do not currently have a {doctor_specialization or 'doctor for that specialty'} available.\n\n"
-            "Available doctors are:\n\n"
-            + doctor_list_text()
-        )
+            appt.status = "cancelled"
+            db.session.commit()
+            clear_conversation_state(phone)
 
-    booking_steps = ["booking", "ask_name", "ask_doctor", "ask_date", "ask_period", "choose_slot"]
+            return action(
+                "text",
+                "Your appointment has been cancelled ❌\n\n"
+                f"Doctor: {appt.doctor_name}\n"
+                f"Date: {appt.date}\n"
+                f"Time: {to_am_pm(appt.time)}"
+            )
 
-    if intent == "book" or step in booking_steps or (step == "menu" and message == "1"):
-        # Always reset when starting a new booking from menu or completed
-        if step in ["completed", "menu"]:
-            reset_conversation_booking(convo)
-            # Pre-fill doctor/date/period from AI (NOT name — always ask fresh)
-            if doctor_id:
-                convo.doctor_id = doctor_id
-            if date_iso and is_valid_date(date_iso):
-                convo.date = date_iso
-            if period in ["morning", "afternoon"]:
-                convo.time_period = period
+        if lower in ["cancel_no", "no", "2"]:
+            convo.step = "completed"
+            db.session.commit()
+            return action("text", "Okay, your appointment remains booked ✅")
+
+        return action("text", "Please choose Yes or No.")
+
+    if step == "ask_name":
+        convo.patient_name = message
+        convo.step = "booking"
+        db.session.commit()
+        return ask_next_missing_info(phone, convo)
+
+    if step == "ask_doctor":
+        if lower.startswith("doctor_"):
+            doctor_id = lower.replace("doctor_", "")
+
+        elif lower.isdigit():
+            doctor_id = lower
 
         else:
-            convo.step = "booking"
+            doctor = Doctor.query.filter(
+                db.func.lower(Doctor.specialization).contains(lower)
+            ).first()
+            doctor_id = str(doctor.id) if doctor else ""
 
-            if patient_name and step != "ask_name":
-                convo.patient_name = patient_name
+        if not doctor_id or not Doctor.query.get(int(doctor_id)):
+            return action("doctors")
 
-            if doctor_id and step not in ["ask_name", "choose_slot"]:
-                convo.doctor_id = doctor_id
-
-            if date_iso and is_valid_date(date_iso):
-                convo.date = date_iso
-
-            if period in ["morning", "afternoon"]:
-                convo.time_period = period
-
-        if step == "ask_name":
-            convo.patient_name = message
-
-        if step == "ask_doctor":
-            valid_ids = [str(d.id) for d in Doctor.query.all()]
-            if message in valid_ids:
-                convo.doctor_id = message
-            elif doctor_id:
-                convo.doctor_id = doctor_id
-
-        if step == "ask_date":
-            if date_iso and is_valid_date(date_iso):
-                convo.date = date_iso
-            elif is_valid_date(message):
-                convo.date = message
-
-        if step == "ask_period":
-            if message == "1" or "morning" in lower:
-                convo.time_period = "morning"
-            elif message == "2" or "afternoon" in lower:
-                convo.time_period = "afternoon"
-
+        convo.doctor_id = doctor_id
+        convo.step = "booking"
         db.session.commit()
-
-        if step == "choose_slot":
-            selected_slot = slot_number if slot_number else message
-            return book_or_reschedule_slot(phone, convo, selected_slot)
 
         return ask_next_missing_info(phone, convo)
 
+    if step == "ask_date":
+        parsed = parse_common_date(message)
+
+        if not parsed and is_valid_date(message):
+            parsed = message
+
+        if not parsed:
+            ai = ask_ai(message, step)
+            parsed = ai.get("date_iso", "")
+
+        if not parsed or not is_valid_date(parsed):
+            return action(
+                "text",
+                "Please enter a valid future date.\n\nExamples:\n2026-06-10\ntomorrow\nnext Monday"
+            )
+
+        convo.date = parsed
+        convo.step = "booking"
+        db.session.commit()
+
+        return ask_next_missing_info(phone, convo)
+
+    if step == "ask_period":
+        if lower in ["period_morning", "morning", "1"]:
+            convo.time_period = "morning"
+
+        elif lower in ["period_afternoon", "afternoon", "2"]:
+            convo.time_period = "afternoon"
+
+        else:
+            return action("period")
+
+        convo.step = "booking"
+        db.session.commit()
+
+        return ask_next_missing_info(phone, convo)
+
+    if step == "choose_slot":
+        return book_or_reschedule_slot(phone, convo, message)
+
     if step == "completed":
-        return (
+        if "book" in lower or "appointment" in lower:
+            reset_conversation_booking(convo)
+            db.session.commit()
+            return ask_next_missing_info(phone, convo)
+
+        return action(
+            "text",
             "You already have a booking.\n\n"
             "You can type:\n"
             "• cancel appointment\n"
@@ -968,7 +899,65 @@ def process_chat_message(phone, message):
             "• menu"
         )
 
-    return show_menu()
+    ai = ask_ai(message, step)
+
+    intent = ai.get("intent", "unknown")
+    doctor_id = str(ai.get("doctor_id", "")).strip()
+    date_iso = str(ai.get("date_iso", "")).strip()
+    period = str(ai.get("time_period", "")).strip()
+
+    if intent == "book":
+        reset_conversation_booking(convo)
+
+        if doctor_id:
+            convo.doctor_id = doctor_id
+
+        if date_iso and is_valid_date(date_iso):
+            convo.date = date_iso
+
+        if period in ["morning", "afternoon"]:
+            convo.time_period = period
+
+        db.session.commit()
+        return ask_next_missing_info(phone, convo)
+
+    if intent == "view_doctors":
+        return action("doctors")
+
+    if intent == "clinic_timings":
+        return action(
+            "text",
+            "ABC Clinic Timings:\n\n"
+            "Monday to Saturday\n"
+            "9:00 AM to 6:00 PM\n\n"
+            "Lunch: 1:00 PM to 2:00 PM\n"
+            "Sunday closed."
+        )
+
+    return action("menu")
+
+
+def send_action(phone, result):
+    kind = result.get("kind")
+    text = result.get("text", "")
+
+    if kind == "menu":
+        send_whatsapp_menu(phone)
+
+    elif kind == "doctors":
+        send_whatsapp_doctor_list(phone)
+
+    elif kind == "period":
+        send_whatsapp_period_buttons(phone)
+
+    elif kind == "cancel":
+        send_whatsapp_cancel_buttons(phone, text)
+
+    elif kind == "slots":
+        send_whatsapp_slot_list(phone, text)
+
+    else:
+        send_whatsapp_message(phone, text)
 
 
 def appointment_to_dict(a):
@@ -1028,16 +1017,13 @@ def receive_webhook():
             message_id = messages[0].get("id")
 
             if message_id:
-                already_done = ProcessedMessage.query.filter_by(
-                    message_id=message_id
-                ).first()
+                already_done = ProcessedMessage.query.filter_by(message_id=message_id).first()
 
                 if already_done:
                     print("DUPLICATE MESSAGE IGNORED:", message_id)
                     return "EVENT_RECEIVED", 200
 
-                saved_msg = ProcessedMessage(message_id=message_id)
-                db.session.add(saved_msg)
+                db.session.add(ProcessedMessage(message_id=message_id))
                 db.session.commit()
 
             phone = messages[0]["from"]
@@ -1048,54 +1034,16 @@ def receive_webhook():
 
             elif "interactive" in messages[0]:
                 interactive = messages[0]["interactive"]
+
                 if interactive["type"] == "list_reply":
-                    list_reply = interactive["list_reply"]
-                    list_id = list_reply["id"]
-                    
-                    if list_id.startswith("slot_"):
-                        text = list_id.replace("slot_", "")
-                    elif list_id.startswith("doctor_"):
-                        text = list_id.replace("doctor_", "")
-                    elif list_id.startswith("menu_"):
-                        text = list_id.replace("menu_", "")
-                    else:
-                        text = list_id
-                        
+                    text = interactive["list_reply"]["id"]
+
                 elif interactive["type"] == "button_reply":
-                    button_reply = interactive["button_reply"]
-                    button_id = button_reply["id"]
-                    
-                    if button_id.startswith("period_"):
-                        text = button_id.replace("period_", "")
-                    elif button_id.startswith("cancel_"):
-                        text = button_id.replace("cancel_", "")
-                    elif button_id.startswith("menu_"):
-                        text = button_id.replace("menu_", "")
-                    else:
-                        text = button_id
+                    text = interactive["button_reply"]["id"]
 
             if text:
-                reply = process_chat_message(phone, text)
-                
-                # Fetch fresh convo to check step status
-                convo = get_or_create_conversation(phone)
-                
-                if convo.step == "menu":
-                    send_whatsapp_menu(phone)
-                elif convo.step == "ask_doctor":
-                    send_whatsapp_doctor_list(phone)
-                elif convo.step == "ask_period":
-                    send_whatsapp_period_buttons(phone)
-                elif convo.step == "confirm_cancel":
-                    active = active_appointments(phone)
-                    if active:
-                        appt = active[-1]
-                        details = f"Doctor: {appt.doctor_name}\nDate: {appt.date}\nTime: {to_am_pm(appt.time)}"
-                        send_whatsapp_cancel_buttons(phone, details)
-                    else:
-                        send_whatsapp_message(phone, reply)
-                else:
-                    send_whatsapp_message(phone, reply)
+                result = process_chat_message(phone, text)
+                send_action(phone, result)
 
     except Exception as e:
         print("WEBHOOK ERROR:", e)
@@ -1118,11 +1066,13 @@ def get_appointments():
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.json
-    reply = process_chat_message(
+
+    result = process_chat_message(
         str(data.get("phone", "")),
         str(data.get("message", ""))
     )
-    return jsonify({"reply": reply})
+
+    return jsonify(result)
 
 
 @app.route("/add-doctor", methods=["POST"])
@@ -1283,12 +1233,7 @@ def reminder(appointment_id):
 
 @app.route("/reset-chat/<phone>", methods=["POST", "GET"])
 def reset_chat(phone):
-    convo = Conversation.query.filter_by(phone=str(phone)).first()
-
-    if convo:
-        db.session.delete(convo)
-        db.session.commit()
-
+    clear_conversation_state(phone)
     return jsonify({"success": True, "message": "Chat reset successfully"})
 
 
