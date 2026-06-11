@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
 import os
 import json
 import requests
@@ -25,6 +26,16 @@ app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
+
+CLINIC_TZ = ZoneInfo("Asia/Kolkata")
+
+
+def clinic_now():
+    return datetime.now(CLINIC_TZ)
+
+
+def clinic_today():
+    return clinic_now().date()
 
 
 class Patient(db.Model):
@@ -52,7 +63,7 @@ class Appointment(db.Model):
     date = db.Column(db.String(20), nullable=False)
     time = db.Column(db.String(20), nullable=False)
     status = db.Column(db.String(50), default="booked")
-    created_at = db.Column(db.String(50), default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    created_at = db.Column(db.String(50), default=lambda: clinic_now().strftime("%Y-%m-%d %H:%M:%S"))
     reminder_sent = db.Column(db.Boolean, default=False)
 
 
@@ -70,7 +81,7 @@ class Conversation(db.Model):
 class ProcessedMessage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     message_id = db.Column(db.String(200), unique=True, nullable=False)
-    created_at = db.Column(db.String(50), default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    created_at = db.Column(db.String(50), default=lambda: clinic_now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
 def init_db():
@@ -112,14 +123,14 @@ def normalize_time_id(value):
 def is_valid_date(d):
     try:
         selected = datetime.strptime(str(d), "%Y-%m-%d").date()
-        return selected >= date.today()
+        return selected >= clinic_today()
     except Exception:
         return False
 
 
 def parse_common_date(message):
     msg = message.lower().strip()
-    today = date.today()
+    today = clinic_today()
 
     if msg == "today":
         return today.strftime("%Y-%m-%d")
@@ -226,8 +237,8 @@ def get_doctor_slots(doctor_id, selected_date):
 def get_available_slots(doctor_id, selected_date):
     all_slots = get_doctor_slots(doctor_id, selected_date)
 
-    if selected_date == date.today().strftime("%Y-%m-%d"):
-        now_time = datetime.now().strftime("%H:%M")
+    if selected_date == clinic_today().strftime("%Y-%m-%d"):
+        now_time = clinic_now().strftime("%H:%M")
         all_slots = [s for s in all_slots if s > now_time]
 
     booked = Appointment.query.filter(
@@ -520,7 +531,7 @@ def ask_ai(message, step):
     prompt = f"""
 You are an AI receptionist for ABC Clinic.
 
-Today is {date.today().strftime("%Y-%m-%d")}.
+Today is {clinic_today().strftime("%Y-%m-%d")}.
 Current conversation step is: {step}
 
 Doctors:
@@ -611,7 +622,6 @@ def ask_next_missing_info(phone, convo):
             "Example: tomorrow / next Monday / 2026-06-10"
         )
 
-    # CHECK CLOSED DAY BEFORE ASKING MORNING/AFTERNOON
     selected_day = datetime.strptime(convo.date, "%Y-%m-%d").strftime("%A")
     working_days = [d.strip() for d in doctor.working_days.split(",")]
 
@@ -939,7 +949,7 @@ def process_chat_message(phone, message):
         return ask_next_missing_info(phone, convo)
 
     if intent == "view_doctors":
-        return action("doctors")
+        return action("text", "Our doctors are:\n\n" + doctor_list_text())
 
     if intent == "clinic_timings":
         return action(
