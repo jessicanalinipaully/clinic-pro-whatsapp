@@ -37,7 +37,7 @@ async function addDoctor() {
 
   const response = await fetch(`${API_URL}/add-doctor`, {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data)
   });
 
@@ -81,7 +81,7 @@ async function bookAppointment() {
 
   const response = await fetch(`${API_URL}/book`, {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data)
   });
 
@@ -196,25 +196,27 @@ function getStatusBadge(status) {
 
 function formatDateHeader(dateStr) {
   try {
-    const parts = dateStr.split('-');
+    const parts = dateStr.split("-");
     if (parts.length !== 3) return dateStr;
+
     const d = new Date(parts[0], parts[1] - 1, parts[2]);
     const today = new Date();
-    today.setHours(0,0,0,0);
+    today.setHours(0, 0, 0, 0);
+
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const dTime = d.getTime();
-    const todayTime = today.getTime();
-    const tomorrowTime = tomorrow.getTime();
-    
-    const options = { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' };
-    const formatted = d.toLocaleDateString('en-US', options);
-    
-    if (dTime === todayTime) {
+
+    const options = { weekday: "long", month: "long", day: "numeric", year: "numeric" };
+    const formatted = d.toLocaleDateString("en-US", options);
+
+    if (d.getTime() === today.getTime()) {
       return `📅 Today — ${formatted}`;
-    } else if (dTime === tomorrowTime) {
+    }
+
+    if (d.getTime() === tomorrow.getTime()) {
       return `🌅 Tomorrow — ${formatted}`;
     }
+
     return `🗓️ ${formatted}`;
   } catch (e) {
     return dateStr;
@@ -223,12 +225,14 @@ function formatDateHeader(dateStr) {
 
 function to12Hour(timeStr) {
   try {
-    const parts = timeStr.split(':');
+    const parts = timeStr.split(":");
     let hour = parseInt(parts[0], 10);
     const minute = parts[1];
-    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const ampm = hour >= 12 ? "PM" : "AM";
+
     hour = hour % 12;
     hour = hour ? hour : 12;
+
     return `${hour}:${minute} ${ampm}`;
   } catch (e) {
     return timeStr;
@@ -236,12 +240,20 @@ function to12Hour(timeStr) {
 }
 
 function updateHeaderDate() {
-  const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
-  const todayStr = new Date().toLocaleDateString('en-US', options);
+  const options = { weekday: "long", year: "numeric", month: "long", day: "numeric" };
+  const todayStr = new Date().toLocaleDateString("en-US", options);
   const display = document.getElementById("currentDateDisplay");
+
   if (display) {
     display.innerHTML = `Real-time booking & scheduling • <strong>${todayStr}</strong>`;
   }
+}
+
+function isPastAppointment(app) {
+  const appointmentDateTime = new Date(`${app.date}T${app.time}`);
+  const now = new Date();
+
+  return appointmentDateTime < now;
 }
 
 function renderAppointments(appointments) {
@@ -253,23 +265,29 @@ function renderAppointments(appointments) {
     return;
   }
 
-  // Split active and inactive
-  const active = appointments.filter(a => a.status === "booked" || a.status === "confirmed");
-  const inactive = appointments.filter(a => a.status === "completed" || a.status === "cancelled");
+  const active = appointments.filter(app =>
+    !isPastAppointment(app) &&
+    (app.status === "booked" || app.status === "confirmed")
+  );
 
-  // Sort active: ascending chronological (earliest first)
+  const inactive = appointments.filter(app =>
+    isPastAppointment(app) ||
+    app.status === "completed" ||
+    app.status === "cancelled" ||
+    app.status === "expired"
+  );
+
   active.sort((a, b) => {
     return `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`);
   });
 
-  // Sort inactive: descending chronological (most recent first)
   inactive.sort((a, b) => {
     return `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`);
   });
 
-  // Render Active Grouped by Date
   if (active.length > 0) {
     const dateGroups = {};
+
     active.forEach(app => {
       if (!dateGroups[app.date]) dateGroups[app.date] = [];
       dateGroups[app.date].push(app);
@@ -279,15 +297,16 @@ function renderAppointments(appointments) {
 
     sortedDates.forEach(date => {
       const groupApps = dateGroups[date];
-      
+
       const groupDiv = document.createElement("div");
       groupDiv.className = "date-group";
-      
+
       groupDiv.innerHTML = `
         <div class="date-group-header">
           <span>${formatDateHeader(date)}</span>
-          <span class="badge-count">${groupApps.length} appointment${groupApps.length > 1 ? 's' : ''}</span>
+          <span class="badge-count">${groupApps.length} appointment${groupApps.length > 1 ? "s" : ""}</span>
         </div>
+
         <div class="table-wrapper">
           <table>
             <thead>
@@ -305,12 +324,14 @@ function renderAppointments(appointments) {
           </table>
         </div>
       `;
-      
+
       const tbody = groupDiv.querySelector("tbody");
+
       groupApps.forEach(app => {
         const row = document.createElement("tr");
-        
+
         let actionButtons = "";
+
         if (app.status === "booked") {
           actionButtons = `
             <button onclick="confirmAppointment('${app.appointment_id}')">Confirm</button>
@@ -332,23 +353,24 @@ function renderAppointments(appointments) {
           <td>${getStatusBadge(app.status)}</td>
           <td style="text-align: right; padding-right: 24px;">${actionButtons}</td>
         `;
+
         tbody.appendChild(row);
       });
-      
+
       container.appendChild(groupDiv);
     });
   }
 
-  // Render Inactive History List at the bottom
   if (inactive.length > 0) {
     const historyDiv = document.createElement("div");
     historyDiv.className = "date-group";
-    
+
     historyDiv.innerHTML = `
       <div class="date-group-header" style="color: var(--text-secondary); background-color: #f1f5f9; border-top: 2px solid var(--border-color);">
         <span>📜 Past & Completed History</span>
-        <span class="badge-count" style="background-color: #e2e8f0; color: var(--text-secondary);">${inactive.length} item${inactive.length > 1 ? 's' : ''}</span>
+        <span class="badge-count" style="background-color: #e2e8f0; color: var(--text-secondary);">${inactive.length} item${inactive.length > 1 ? "s" : ""}</span>
       </div>
+
       <div class="table-wrapper">
         <table>
           <thead>
@@ -367,10 +389,12 @@ function renderAppointments(appointments) {
         </table>
       </div>
     `;
-    
+
     const tbody = historyDiv.querySelector("tbody");
+
     inactive.forEach(app => {
       const row = document.createElement("tr");
+
       row.innerHTML = `
         <td>#${app.appointment_id}</td>
         <td>${app.date}</td>
@@ -381,10 +405,15 @@ function renderAppointments(appointments) {
         <td>${getStatusBadge(app.status)}</td>
         <td style="text-align: right; padding-right: 24px;"><span class="done-text">Archived</span></td>
       `;
+
       tbody.appendChild(row);
     });
-    
+
     container.appendChild(historyDiv);
+  }
+
+  if (active.length === 0 && inactive.length === 0) {
+    container.innerHTML = `<div class="empty">No appointments found</div>`;
   }
 }
 
