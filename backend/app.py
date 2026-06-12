@@ -225,9 +225,24 @@ def get_doctor_slots(doctor_id, selected_date):
 def get_available_slots(doctor_id, selected_date):
     all_slots = get_doctor_slots(doctor_id, selected_date)
 
-    if selected_date == clinic_today().strftime("%Y-%m-%d"):
-        minimum_time = (clinic_now() + timedelta(hours=1)).strftime("%H:%M")
-        all_slots = [s for s in all_slots if s >= minimum_time]
+    selected_date_obj = datetime.strptime(selected_date, "%Y-%m-%d").date()
+
+    # Same-day bookings must be at least 1 hour from current clinic time
+    minimum_datetime = clinic_now() + timedelta(hours=1)
+
+    valid_slots = []
+
+    for slot in all_slots:
+        slot_time = datetime.strptime(slot, "%H:%M").time()
+
+        slot_datetime = datetime.combine(
+            selected_date_obj,
+            slot_time,
+            tzinfo=CLINIC_TZ
+        )
+
+        if slot_datetime >= minimum_datetime:
+            valid_slots.append(slot)
 
     booked = Appointment.query.filter(
         Appointment.doctor_id == int(doctor_id),
@@ -236,7 +251,8 @@ def get_available_slots(doctor_id, selected_date):
     ).all()
 
     booked_times = [a.time for a in booked]
-    return [s for s in all_slots if s not in booked_times]
+
+    return [s for s in valid_slots if s not in booked_times]
 
 
 def filter_slots(slots, period):
