@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import os
 import json
@@ -18,7 +18,6 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///clinic_local.db")
-
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -86,7 +85,6 @@ class ProcessedMessage(db.Model):
 
 def init_db():
     db.create_all()
-
     if Doctor.query.count() == 0:
         db.session.add_all([
             Doctor(id=1, name="Dr Priya", specialization="Dermatologist"),
@@ -110,13 +108,11 @@ def to_am_pm(t):
 
 def normalize_time_id(value):
     value = str(value).strip()
-
     if value.startswith("slot_"):
         raw = value.replace("slot_", "")
         if len(raw) == 4 and raw.isdigit():
             return raw[:2] + ":" + raw[2:]
         return raw
-
     return value
 
 
@@ -152,10 +148,8 @@ def parse_common_date(message):
         if day_name in msg:
             current = today.weekday()
             diff = day_num - current
-
             if diff <= 0 or "next" in msg:
                 diff += 7
-
             return (today + timedelta(days=diff)).strftime("%Y-%m-%d")
 
     return ""
@@ -168,12 +162,10 @@ def doctor_list_text():
 
 def get_or_create_conversation(phone):
     convo = Conversation.query.filter_by(phone=str(phone)).first()
-
     if not convo:
         convo = Conversation(phone=str(phone), step="menu")
         db.session.add(convo)
         db.session.commit()
-
     return convo
 
 
@@ -188,7 +180,6 @@ def reset_conversation_booking(convo):
 
 def clear_conversation_state(phone):
     convo = Conversation.query.filter_by(phone=str(phone)).first()
-
     if convo:
         convo.patient_name = ""
         convo.step = "menu"
@@ -208,7 +199,6 @@ def active_appointments(phone):
 
 def get_doctor_slots(doctor_id, selected_date):
     doctor = Doctor.query.get(int(doctor_id))
-
     if not doctor:
         return []
 
@@ -225,10 +215,8 @@ def get_doctor_slots(doctor_id, selected_date):
 
     while current < end:
         t = current.strftime("%H:%M")
-
         if t < "13:00" or t >= "14:00":
             slots.append(t)
-
         current += timedelta(minutes=doctor.slot_minutes)
 
     return slots
@@ -237,7 +225,6 @@ def get_doctor_slots(doctor_id, selected_date):
 def get_available_slots(doctor_id, selected_date):
     all_slots = get_doctor_slots(doctor_id, selected_date)
 
-    # If booking for today, show only slots at least 1 hour from now
     if selected_date == clinic_today().strftime("%Y-%m-%d"):
         minimum_time = (clinic_now() + timedelta(hours=1)).strftime("%H:%M")
         all_slots = [s for s in all_slots if s >= minimum_time]
@@ -249,17 +236,14 @@ def get_available_slots(doctor_id, selected_date):
     ).all()
 
     booked_times = [a.time for a in booked]
-
     return [s for s in all_slots if s not in booked_times]
 
 
 def filter_slots(slots, period):
     if period == "morning":
         return [s for s in slots if int(s.split(":")[0]) < 13]
-
     if period == "afternoon":
         return [s for s in slots if int(s.split(":")[0]) >= 14]
-
     return slots
 
 
@@ -303,18 +287,11 @@ def send_whatsapp_menu(to):
             "header": {"type": "text", "text": "Clinic Menu"},
             "body": {"text": "Welcome to ABC Clinic 👋\n\nHow can we help you today?"},
             "footer": {"text": "ABC Clinic"},
-            "action": {
-                "button": "Select Option",
-                "sections": [{"title": "Available Actions", "rows": rows}]
-            },
+            "action": {"button": "Select Option", "sections": [{"title": "Available Actions", "rows": rows}]},
         },
     }
 
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
     r = requests.post(url, headers=headers, json=payload)
     print("MENU RESPONSE:", r.status_code, r.text)
@@ -324,11 +301,7 @@ def send_whatsapp_doctor_list(to):
     doctors = Doctor.query.order_by(Doctor.id).all()
 
     rows = [
-        {
-            "id": f"doctor_{doc.id}",
-            "title": doc.name[:24],
-            "description": doc.specialization[:72],
-        }
+        {"id": f"doctor_{doc.id}", "title": doc.name[:24], "description": doc.specialization[:72]}
         for doc in doctors
     ]
 
@@ -341,18 +314,11 @@ def send_whatsapp_doctor_list(to):
             "header": {"type": "text", "text": "Select Doctor"},
             "body": {"text": "Please select a doctor for your appointment:"},
             "footer": {"text": "ABC Clinic"},
-            "action": {
-                "button": "Choose Doctor",
-                "sections": [{"title": "Doctors", "rows": rows}]
-            },
+            "action": {"button": "Choose Doctor", "sections": [{"title": "Doctors", "rows": rows}]},
         },
     }
 
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
     r = requests.post(url, headers=headers, json=payload)
     print("DOCTOR LIST RESPONSE:", r.status_code, r.text)
@@ -375,11 +341,7 @@ def send_whatsapp_period_buttons(to):
         },
     }
 
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
     r = requests.post(url, headers=headers, json=payload)
     print("PERIOD RESPONSE:", r.status_code, r.text)
@@ -392,9 +354,7 @@ def send_whatsapp_cancel_buttons(to, details):
         "type": "interactive",
         "interactive": {
             "type": "button",
-            "body": {
-                "text": f"Are you sure you want to cancel this appointment?\n\n{details}"
-            },
+            "body": {"text": f"Are you sure you want to cancel this appointment?\n\n{details}"},
             "action": {
                 "buttons": [
                     {"type": "reply", "reply": {"id": "cancel_yes", "title": "Yes, cancel"}},
@@ -404,11 +364,7 @@ def send_whatsapp_cancel_buttons(to, details):
         },
     }
 
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
     r = requests.post(url, headers=headers, json=payload)
     print("CANCEL BUTTONS RESPONSE:", r.status_code, r.text)
@@ -434,18 +390,11 @@ def send_whatsapp_slot_list(to, slots):
             "header": {"type": "text", "text": "Available Slots"},
             "body": {"text": "Please choose your appointment time:"},
             "footer": {"text": "ABC Clinic"},
-            "action": {
-                "button": "Choose Time",
-                "sections": [{"title": "Available Time Slots", "rows": rows}],
-            },
+            "action": {"button": "Choose Time", "sections": [{"title": "Available Time Slots", "rows": rows}]},
         },
     }
 
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}", "Content-Type": "application/json"}
     url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
     r = requests.post(url, headers=headers, json=payload)
     print("SLOT LIST RESPONSE:", r.status_code, r.text)
@@ -466,22 +415,18 @@ def fallback_ai(message):
     }
 
     parsed_date = parse_common_date(message)
-
     if parsed_date:
         result["date_iso"] = parsed_date
 
     if any(x in msg for x in ["tooth", "teeth", "dental", "dentist", "cavity", "gum"]):
         result["intent"] = "book"
         result["doctor_id"] = "2"
-
     elif any(x in msg for x in ["skin", "rash", "acne", "allergy", "pimple", "dermatologist"]):
         result["intent"] = "book"
         result["doctor_id"] = "1"
-
     elif any(x in msg for x in ["fever", "cold", "cough", "headache", "body pain", "stomach"]):
         result["intent"] = "book"
         result["doctor_id"] = "3"
-
     elif any(x in msg for x in ["book", "appointment", "consult", "schedule"]):
         result["intent"] = "book"
 
@@ -519,15 +464,7 @@ def ask_ai(message, step):
         return fallback
 
     doctors = Doctor.query.order_by(Doctor.id).all()
-
-    doctor_data = [
-        {
-            "doctor_id": str(d.id),
-            "name": d.name,
-            "specialization": d.specialization,
-        }
-        for d in doctors
-    ]
+    doctor_data = [{"doctor_id": str(d.id), "name": d.name, "specialization": d.specialization} for d in doctors]
 
     prompt = f"""
 You are an AI receptionist for ABC Clinic.
@@ -557,15 +494,8 @@ Return ONLY valid JSON:
 
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-
-        headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": GEMINI_API_KEY,
-        }
-
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}]
-        }
+        headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
 
         r = requests.post(url, headers=headers, json=payload, timeout=20)
         data = r.json()
@@ -639,12 +569,26 @@ def ask_next_missing_info(phone, convo):
             "Example: tomorrow / next Monday / 2026-06-10"
         )
 
+    available = get_available_slots(convo.doctor_id, convo.date)
+
+    if not available:
+        convo.date = ""
+        convo.time_period = ""
+        convo.step = "ask_date"
+        db.session.commit()
+
+        return action(
+            "text",
+            "Sorry, no slots are available for this date.\n\n"
+            "Please choose another date.\n"
+            "Example: tomorrow / next Monday / 2026-06-10"
+        )
+
     if not convo.time_period:
         convo.step = "ask_period"
         db.session.commit()
         return action("period")
 
-    available = get_available_slots(convo.doctor_id, convo.date)
     filtered = filter_slots(available, convo.time_period)
 
     if not filtered:
@@ -699,7 +643,6 @@ def book_or_reschedule_slot(phone, convo, selected_slot):
         appt.date = convo.date
         appt.time = selected_time
         appt.status = "booked"
-
         start_msg = "Appointment rescheduled successfully ✅"
 
     else:
@@ -712,14 +655,11 @@ def book_or_reschedule_slot(phone, convo, selected_slot):
             time=selected_time,
             status="booked",
         )
-
         db.session.add(appt)
         db.session.flush()
-
         start_msg = "Appointment successfully booked ✅"
 
     patient = Patient.query.filter_by(phone=str(phone)).first()
-
     if not patient:
         patient = Patient(name=convo.patient_name, phone=str(phone))
         db.session.add(patient)
@@ -753,13 +693,7 @@ def process_chat_message(phone, message):
         db.session.commit()
         return action("menu")
 
-    if lower in [
-    "book appointment",
-    "i want to book an appointment",
-    "i want to book",
-    "book",
-    "appointment"
-]:
+    if lower in ["book appointment", "i want to book an appointment", "i want to book", "book", "appointment"]:
         reset_conversation_booking(convo)
         db.session.commit()
         return ask_next_missing_info(phone, convo)
@@ -805,30 +739,32 @@ def process_chat_message(phone, message):
     if lower in ["menu_reschedule", "5", "reschedule appointment"]:
         active = active_appointments(phone)
 
-    if not active:
-        return action("text", "You do not have any active appointment to reschedule.")
+        if not active:
+            convo.step = "menu"
+            db.session.commit()
+            return action("text", "You do not have any active appointment to reschedule.")
 
-    appt = active[-1]
+        appt = active[-1]
 
-    convo.step = "ask_reschedule_date"
-    convo.appointment_id = str(appt.id)
-    convo.patient_name = appt.patient_name
-    convo.doctor_id = str(appt.doctor_id)
-    convo.date = ""
-    convo.time_period = ""
-    db.session.commit()
+        convo.step = "ask_reschedule_date"
+        convo.appointment_id = str(appt.id)
+        convo.patient_name = appt.patient_name
+        convo.doctor_id = str(appt.doctor_id)
+        convo.date = ""
+        convo.time_period = ""
+        db.session.commit()
 
-    return action(
-        "text",
-        "Okay, let's reschedule your appointment.\n\n"
-        f"Current appointment:\n"
-        f"Patient: {appt.patient_name}\n"
-        f"Doctor: {appt.doctor_name}\n"
-        f"Date: {appt.date}\n"
-        f"Time: {to_am_pm(appt.time)}\n\n"
-        "Please tell me the new date.\n"
-        "Example: tomorrow / next Monday / 2026-06-15"
-    )
+        return action(
+            "text",
+            "Okay, let's reschedule your appointment.\n\n"
+            f"Current appointment:\n"
+            f"Patient: {appt.patient_name}\n"
+            f"Doctor: {appt.doctor_name}\n"
+            f"Date: {appt.date}\n"
+            f"Time: {to_am_pm(appt.time)}\n\n"
+            "Please tell me the new date.\n"
+            "Example: tomorrow / next Monday / 2026-06-15"
+        )
 
     if step == "confirm_cancel":
         if lower in ["cancel_yes", "yes", "yes cancel", "1"]:
@@ -856,42 +792,42 @@ def process_chat_message(phone, message):
             return action("text", "Okay, your appointment remains booked ✅")
 
         return action("text", "Please choose Yes or No.")
+
     if step == "ask_reschedule_date":
         parsed = parse_common_date(message)
 
-    if not parsed and is_valid_date(message):
-        parsed = message
+        if not parsed and is_valid_date(message):
+            parsed = message
 
-    if not parsed:
-        ai = ask_ai(message, step)
-        parsed = ai.get("date_iso", "")
+        if not parsed:
+            ai = ask_ai(message, step)
+            parsed = ai.get("date_iso", "")
 
-    if not parsed or not is_valid_date(parsed):
-        return action(
-            "text",
-            "Please enter a valid future date.\n\nExamples:\ntomorrow\nnext Monday\n2026-06-15"
-        )
+        if not parsed or not is_valid_date(parsed):
+            return action(
+                "text",
+                "Please enter a valid future date.\n\nExamples:\ntomorrow\nnext Monday\n2026-06-15"
+            )
 
-    convo.date = parsed
-    convo.time_period = ""
-    convo.step = "booking"
-    db.session.commit()
-
-    doctor = Doctor.query.get(int(convo.doctor_id))
-    available = get_available_slots(convo.doctor_id, convo.date)
-
-    if not available:
-        convo.date = ""
-        convo.step = "ask_reschedule_date"
+        convo.date = parsed
+        convo.time_period = ""
+        convo.step = "booking"
         db.session.commit()
 
-        return action(
-            "text",
-            f"Sorry, no slots are available for {parsed}.\n\n"
-            "Please choose another date."
-        )
+        available = get_available_slots(convo.doctor_id, convo.date)
 
-    return ask_next_missing_info(phone, convo)
+        if not available:
+            convo.date = ""
+            convo.step = "ask_reschedule_date"
+            db.session.commit()
+
+            return action(
+                "text",
+                f"Sorry, no slots are available for {parsed}.\n\n"
+                "Please choose another date."
+            )
+
+        return ask_next_missing_info(phone, convo)
 
     if step == "ask_name":
         convo.patient_name = message
@@ -902,10 +838,8 @@ def process_chat_message(phone, message):
     if step == "ask_doctor":
         if lower.startswith("doctor_"):
             doctor_id = lower.replace("doctor_", "")
-
         elif lower.isdigit():
             doctor_id = lower
-
         else:
             doctor = Doctor.query.filter(
                 db.func.lower(Doctor.specialization).contains(lower)
@@ -946,10 +880,8 @@ def process_chat_message(phone, message):
     if step == "ask_period":
         if lower in ["period_morning", "morning", "1"]:
             convo.time_period = "morning"
-
         elif lower in ["period_afternoon", "afternoon", "2"]:
             convo.time_period = "afternoon"
-
         else:
             return action("period")
 
@@ -1020,19 +952,14 @@ def send_action(phone, result):
 
     if kind == "menu":
         send_whatsapp_menu(phone)
-
     elif kind == "doctors":
         send_whatsapp_doctor_list(phone)
-
     elif kind == "period":
         send_whatsapp_period_buttons(phone)
-
     elif kind == "cancel":
         send_whatsapp_cancel_buttons(phone, text)
-
     elif kind == "slots":
         send_whatsapp_slot_list(phone, text)
-
     else:
         send_whatsapp_message(phone, text)
 
@@ -1143,12 +1070,7 @@ def get_appointments():
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.json
-
-    result = process_chat_message(
-        str(data.get("phone", "")),
-        str(data.get("message", ""))
-    )
-
+    result = process_chat_message(str(data.get("phone", "")), str(data.get("message", "")))
     return jsonify(result)
 
 
