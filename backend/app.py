@@ -805,28 +805,30 @@ def process_chat_message(phone, message):
     if lower in ["menu_reschedule", "5", "reschedule appointment"]:
         active = active_appointments(phone)
 
-        if not active:
-            return action("text", "You do not have any active appointment to reschedule.")
+    if not active:
+        return action("text", "You do not have any active appointment to reschedule.")
 
-        appt = active[-1]
+    appt = active[-1]
 
-        convo.step = "booking"
-        convo.appointment_id = str(appt.id)
-        convo.patient_name = appt.patient_name
-        convo.doctor_id = str(appt.doctor_id)
-        convo.date = ""
-        convo.time_period = ""
-        db.session.commit()
+    convo.step = "ask_reschedule_date"
+    convo.appointment_id = str(appt.id)
+    convo.patient_name = appt.patient_name
+    convo.doctor_id = str(appt.doctor_id)
+    convo.date = ""
+    convo.time_period = ""
+    db.session.commit()
 
-        return action(
-            "text",
-            "Okay, let's reschedule your appointment.\n\n"
-            f"Current appointment:\n"
-            f"Doctor: {appt.doctor_name}\n"
-            f"Date: {appt.date}\n"
-            f"Time: {to_am_pm(appt.time)}\n\n"
-            "Please tell me the new date."
-        )
+    return action(
+        "text",
+        "Okay, let's reschedule your appointment.\n\n"
+        f"Current appointment:\n"
+        f"Patient: {appt.patient_name}\n"
+        f"Doctor: {appt.doctor_name}\n"
+        f"Date: {appt.date}\n"
+        f"Time: {to_am_pm(appt.time)}\n\n"
+        "Please tell me the new date.\n"
+        "Example: tomorrow / next Monday / 2026-06-15"
+    )
 
     if step == "confirm_cancel":
         if lower in ["cancel_yes", "yes", "yes cancel", "1"]:
@@ -854,6 +856,42 @@ def process_chat_message(phone, message):
             return action("text", "Okay, your appointment remains booked ✅")
 
         return action("text", "Please choose Yes or No.")
+    if step == "ask_reschedule_date":
+        parsed = parse_common_date(message)
+
+    if not parsed and is_valid_date(message):
+        parsed = message
+
+    if not parsed:
+        ai = ask_ai(message, step)
+        parsed = ai.get("date_iso", "")
+
+    if not parsed or not is_valid_date(parsed):
+        return action(
+            "text",
+            "Please enter a valid future date.\n\nExamples:\ntomorrow\nnext Monday\n2026-06-15"
+        )
+
+    convo.date = parsed
+    convo.time_period = ""
+    convo.step = "booking"
+    db.session.commit()
+
+    doctor = Doctor.query.get(int(convo.doctor_id))
+    available = get_available_slots(convo.doctor_id, convo.date)
+
+    if not available:
+        convo.date = ""
+        convo.step = "ask_reschedule_date"
+        db.session.commit()
+
+        return action(
+            "text",
+            f"Sorry, no slots are available for {parsed}.\n\n"
+            "Please choose another date."
+        )
+
+    return ask_next_missing_info(phone, convo)
 
     if step == "ask_name":
         convo.patient_name = message
