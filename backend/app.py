@@ -662,18 +662,36 @@ def book_or_reschedule_slot(phone, convo, selected_slot):
         start_msg = "Appointment rescheduled successfully ✅"
 
     else:
-        appt = Appointment(
-            patient_name=convo.patient_name,
-            phone=str(phone),
-            doctor_id=int(convo.doctor_id),
-            doctor_name=doctor.name,
-            date=convo.date,
-            time=selected_time,
-            status="booked",
+
+        existing_appointment = Appointment.query.filter_by(
+        doctor_id=int(convo.doctor_id),
+        date=convo.date,
+        time=selected_time
+    ).filter(
+        Appointment.status.in_(["booked", "confirmed"])
+    ).first()
+
+    if existing_appointment:
+        return action(
+            "text",
+            phone,
+            "❌ Sorry, this slot has just been booked by another patient.\n\nPlease choose another available slot."
         )
-        db.session.add(appt)
-        db.session.flush()
-        start_msg = "Appointment successfully booked ✅"
+
+    appt = Appointment(
+        patient_name=convo.patient_name,
+        phone=str(phone),
+        doctor_id=int(convo.doctor_id),
+        doctor_name=doctor.name,
+        date=convo.date,
+        time=selected_time,
+        status="booked",
+    )
+
+    db.session.add(appt)
+    db.session.flush()
+
+    start_msg = "Appointment successfully booked ✅"
 
     patient = Patient.query.filter_by(phone=str(phone)).first()
     if not patient:
