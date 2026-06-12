@@ -753,6 +753,17 @@ def process_chat_message(phone, message):
         db.session.commit()
         return action("menu")
 
+    if lower in [
+    "book appointment",
+    "i want to book an appointment",
+    "i want to book",
+    "book",
+    "appointment"
+]:
+        reset_conversation_booking(convo)
+        db.session.commit()
+        return ask_next_missing_info(phone, convo)
+
     if lower in ["menu_book", "1"]:
         reset_conversation_booking(convo)
         db.session.commit()
